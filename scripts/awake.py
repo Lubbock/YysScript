@@ -19,12 +19,12 @@ class Awake(Personal):
     def loop_end():
         while not MapCv.__in_screenshot__("妖气封印打完_2.png"):
             time.sleep(2)
-        pyautogui.click(awake_200, pause=2)
+        pyautogui.click(awake_100, pause=2)
 
     @staticmethod
     def loop_start():
         while not MapCv.__in_screenshot__("挑战.png"):
-            pyautogui.click(awake_200, pause=2)
+            pyautogui.click(awake_100, pause=2)
             time.sleep(2)
 
     @staticmethod
