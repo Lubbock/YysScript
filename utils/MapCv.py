@@ -36,5 +36,22 @@ class MapCv:
         return match
 
     @staticmethod
+    def location_screen(filename, threshold=0.7):
+        img = pyautogui.screenshot()
+        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # 加载将要搜索的图像模板
+        template = cv2.imread(filename, 0)
+        w, h = template.shape[::-1]
+        res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
+        # 设定阈值
+        # res大于70%
+        loc = np.where(res >= threshold)
+        match = False
+        for pt in zip(*loc[::-1]):  # *号表示可选参数
+            return (pt[0] + w) / 2, (pt[1] + h) / 2
+        return 0, 0
+
+    @staticmethod
     def end_adventure():
         return MapCv.__in_screenshot__('end_adventure.png')
