@@ -50,7 +50,26 @@ class MapCv:
         match = False
         for pt in zip(*loc[::-1]):  # *号表示可选参数
             return (pt[0] + w) / 2, (pt[1] + h) / 2
-        return 0, 0
+        return None
+
+    @staticmethod
+    def location_multiscreen(filename, threshold=0.7, path="res/img/"):
+        img = pyautogui.screenshot()
+        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # 加载将要搜索的图像模板
+        template = cv2.imread(path + filename, 0)
+        w, h = template.shape[::-1]
+        res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
+        # 设定阈值
+        # res大于70%
+        loc = np.where(res >= threshold)
+        match = False
+        points = []
+        for pt in zip(*loc[::-1]):  # *号表示可选参数
+            point = (pt[0] + w) / 2, (pt[1] + h) / 2
+            points.append(point)
+        return points
 
     @staticmethod
     def end_adventure():
