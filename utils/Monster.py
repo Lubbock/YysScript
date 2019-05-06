@@ -21,16 +21,15 @@ class Monster:
         upper_blue = np.array([20, 91, 202])
         mask = cv2.inRange(hsv, lower_blue, upper_blue)
         # 去噪点，铺平
-        erosion = cv2.erode(mask, kernel_4, iterations=1)
-        erosion = cv2.erode(erosion, kernel_2, iterations=1)
+        # erosion = cv2.erode(mask, kernel_4, iterations=1)
+        erosion = cv2.erode(mask, kernel_2, iterations=1)
         # erosion = cv2.erode(erosion, kernel_4, iterations=1)
         # 污染
         dilation = cv2.dilate(erosion, kernel_4, iterations=3)
-        dilation = cv2.dilate(dilation, kernel_8, iterations=6)
+        dilation = cv2.dilate(dilation, kernel_8, iterations=2)
 
         ret, binary = cv2.threshold(dilation, 127, 255, cv2.THRESH_BINARY)
-
-        contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        _, contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         return contours
 
     @staticmethod
@@ -58,15 +57,17 @@ class Monster:
         # detect blue
         # res = cv2.bitwise_and(frame, frame, mask=mask)
         # cv2.imshow('Result', res)
-        erosion = cv2.erode(mask, kernel_2, iterations=2)
-        erosion = cv2.erode(erosion, kernel_4, iterations=2)
+        erosion = cv2.erode(mask, kernel_2, iterations=1)
+        # cv2.imshow("erosion", erosion)
+        # erosion = cv2.erode(erosion, kernel_4, iterations=2)
         # erosion = cv2.erode(erosion, kernel_4, iterations=1)
-        dilation = cv2.dilate(erosion, kernel_16, iterations=4)
-        dilation = cv2.dilate(dilation, kernel_8, iterations=2)
+        # dilation = cv2.dilate(erosion, kernel_16, iterations=4)
+        dilation = cv2.dilate(erosion, kernel_8, iterations=2)
 
         ret, binary = cv2.threshold(dilation, 1, 127, cv2.THRESH_BINARY)
+        cv2.imshow("binary", binary)
         #  cv2.imshow("mask", binary)
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        _, contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
         return contours
 
@@ -74,6 +75,7 @@ class Monster:
     def paint_rect(frame, title, monster_contours, exp_contours, color=(0, 0, 255)):
         p = 1
         contours = Monster.ai_match(monster_contours, exp_contours)
+        point = []
         for contour in contours:
             x = contour[0]
             y = contour[1]
@@ -94,6 +96,10 @@ class Monster:
             font = cv2.FONT_HERSHEY_SIMPLEX
             cv2.putText(frame, title.format(p), (x - 10, y + 10), font, 1, color, 2)  # 加减10是调整字符位置
             p += 1
+            x_real = int((x + w / 2) * 2)
+            y_real = int((y + h / 2) * 2)
+            point.append((x_real, y_real))
+        return point
 
     @staticmethod
     def ai_match(monster_contours, exp_contours):
@@ -104,34 +110,33 @@ class Monster:
             x, y, w, h = cv2.boundingRect(i)
             exp_points.append([x, y, w, h])
             min_monster = None
-            if 200 < y < 1200:
-                log.info("exp x= {},y={},w= {},h = {}", x, y, w, h)
+            log.info(y)
+            if 100 < y < 300:
                 for m in monster_contours:
                     m_x, m_y, m_w, m_h = cv2.boundingRect(m)
-                    if 200 < m_y < 1200:
-                        log.info("m_x = {},m_y = {},m_w = {},m_h = {},最小值 ={}".format(m_x, m_y, m_w, m_h, abs(m_x - x)))
+                    log.info("怪物y值{}".format(m_y))
+                    if 100 < m_y < 300:
                         if abs(m_x - x) < tem:
                             tem = abs(m_x - x)
                             min_monster = [m_x, m_y, m_w, m_h, x, y, w, h]
-                log.info(min_monster)
                 if min_monster is not None:
                     exp_monsters.append(min_monster)
                 tem = 9999
-
         return exp_monsters
 
     @staticmethod
-    def lock_monster_2():
+    def lock_monster_exp():
         frame = pyautogui.screenshot()
         frame = cv2.cvtColor(numpy.asarray(frame), cv2.COLOR_RGB2BGR)
+        frame = cv2.resize(frame, (640, 400), interpolation=cv2.INTER_CUBIC)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        hsv = cv2.resize(hsv, (640, 400), interpolation=cv2.INTER_CUBIC)
+
         exp_contours = Monster.lock_exp(hsv)
         monster_contours = Monster.lock_monster_inner(hsv)
-        Monster.paint_rect(frame, "{}", monster_contours, exp_contours, color=(255, 0, 0))
+        point = Monster.paint_rect(frame, "{}", monster_contours, exp_contours, color=(255, 0, 0))
         # Monster.paint_rect(frame, "{}", monster_contours)
-        cv2.imshow("img", frame)
-        cv2.waitKey(0)
+        print(point)
+        return point
 
     @staticmethod
     def lock_monster():

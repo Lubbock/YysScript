@@ -17,18 +17,22 @@ log = Logger().getlog()
 class Adventure(Personal):
 
     @staticmethod
-    def activate():
+    def activate(exp=False):
         wait_adventure = MapCv.wait_adventure()
         if not wait_adventure:
             time.sleep(2)
         log.info("开始锁定怪物")
-        monsters = Monster.lock_monster()
+        if exp:
+            monsters = Monster.lock_monster_exp()
+        else:
+            monsters = Monster.lock_monster()
         feat = False
         log.info("找到怪物 {} 个，开始进行处理".format(len(monsters)))
         if len(monsters) > 0:
             feat = True
-            print(monsters[0])
             pyautogui.click(monsters[0], pause=2)
+            log.info("=======================")
+            log.info(monsters[0])
         else:
             feat = False
         return feat, MapCv.append_power()
@@ -69,18 +73,20 @@ class Adventure(Personal):
         # 打完boss等着拿奖励
 
     @staticmethod
-    def start(timer=2):
+    def start(timer=10, exp=True):
         pyautogui.click(last_adventure, pause=3)
+
         for i in range(0, timer):
             log.info("开始第{}次探索副本".format(i + 1))
             pyautogui.click(adventure_200, pause=4)
             Adventure.next_page()
             activate_num = 0
+            next_page_num = 1
             while True:
                 log.info("判断是否还在扫怪阶段,不是重新进入地图")
                 if Adventure.in_adventure_home():
                     break
-                feat, append_power = Adventure.activate()
+                feat, append_power = Adventure.activate(exp)
                 log.info("扫怪结束...")
                 if append_power:
                     log.info("体力已耗尽 需要补充体力，结束探索")
@@ -98,4 +104,13 @@ class Adventure(Personal):
                     Adventure.loop_checkend()
                 else:
                     log.info("未查询到怪物，进入下一步地图查找")
-                    Adventure.next_page()
+                    if next_page_num < 5:
+                        next_page_num += 1
+                        Adventure.next_page()
+                    else:
+                        pyautogui.click(49, 121)
+                        log.info("退出到主页")
+                        time.sleep(2)
+                        pyautogui.click(686, 419)
+                        time.sleep(5)
+                        break
