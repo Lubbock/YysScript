@@ -47,10 +47,52 @@ class Adventure(Personal):
         pyautogui.click(awake_200)
         time.sleep(4)
 
+    # 自动更换狗粮
+    @staticmethod
+    def loop_check_monster():
+        time.sleep(2)
+        while not MapCv.__in_screenshot__("准备2.png"):
+            time.sleep(2)
+
+        pyautogui.doubleClick(413, 558, duration=2, pause=2)
+
+        points = MapCv.location_multiscreen("满.png")
+
+        block_1 = 377
+        block_2 = 760
+
+        for point in points:
+            if point[1] < 400:
+                if block_1 < point[0] < block_2:
+                    Adventure.next_dog()
+                    time.sleep(2)
+                    pyautogui.moveTo(472, 572, pause=2)
+                    pyautogui.dragTo(point[0], point[1] + 100, 1)
+                    break
+                elif point[0] < block_1:
+                    Adventure.next_dog()
+                    time.sleep(2)
+                    pyautogui.moveTo(472, 572, pause=2)
+                    pyautogui.dragTo(point[0], point[1] + 100, 1)
+                    break
+
+        time.sleep(1)
+        pyautogui.click(1048, 558, duration=1)
+        time.sleep(2)
+        pyautogui.click(1048, 558, duration=1)
+
+        # 狗粮大队长 在第三个格子
+
     @staticmethod
     def next_page():
         pyautogui.moveTo(558, 538)
         pyautogui.dragTo(92, 519, 1)
+
+    @staticmethod
+    def next_dog():
+        pyautogui.moveTo(175,673)
+        pyautogui.dragTo(788, 674, 2)
+
 
     # 校验是不是已经回到主页了
     @staticmethod
@@ -97,14 +139,14 @@ class Adventure(Personal):
                         # 如果没有开始打怪还在等待的地方，重新查找monster. 找到错误的monster需要重新搜索
                         log.info("怪物定位出现问题，重新寻找")
                         continue
-
+                    Adventure.loop_check_monster()
                     # 不在检测的地方 说明已经在打怪了，等待
                     activate_num += 1
                     # 循环检测是否打完也怪
                     Adventure.loop_checkend()
                 else:
                     log.info("未查询到怪物，进入下一步地图查找")
-                    if next_page_num < 5:
+                    if next_page_num < 4:
                         next_page_num += 1
                         Adventure.next_page()
                     else:

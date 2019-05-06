@@ -111,11 +111,11 @@ class Monster:
             exp_points.append([x, y, w, h])
             min_monster = None
             log.info(y)
-            if 100 < y < 300:
+            if 50 < y < 300:
                 for m in monster_contours:
                     m_x, m_y, m_w, m_h = cv2.boundingRect(m)
                     log.info("怪物y值{}".format(m_y))
-                    if 100 < m_y < 300:
+                    if 50 < m_y < 300:
                         if abs(m_x - x) < tem:
                             tem = abs(m_x - x)
                             min_monster = [m_x, m_y, m_w, m_h, x, y, w, h]
