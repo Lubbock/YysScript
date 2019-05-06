@@ -20,12 +20,12 @@ class MapCv:
         return MapCv.__in_screenshot__('购买体力.png')
 
     @staticmethod
-    def __in_screenshot__(filename, threshold=0.7):
+    def __in_screenshot__(filename, threshold=0.7, path="res/img/"):
         img = pyautogui.screenshot()
         img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         # 加载将要搜索的图像模板
-        template = cv2.imread(filename, 0)
+        template = cv2.imread(path + filename, 0)
         res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
         # 设定阈值
         # res大于70%
@@ -36,12 +36,12 @@ class MapCv:
         return match
 
     @staticmethod
-    def location_screen(filename, threshold=0.7):
+    def location_screen(filename, threshold=0.7, path="res/img/"):
         img = pyautogui.screenshot()
         img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         # 加载将要搜索的图像模板
-        template = cv2.imread(filename, 0)
+        template = cv2.imread(path + filename, 0)
         w, h = template.shape[::-1]
         res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
         # 设定阈值
