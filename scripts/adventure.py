@@ -44,7 +44,7 @@ class Adventure(Personal):
             time.sleep(pause)
         log.info("打怪完成,返回主图...")
         pyautogui.click(awake_200, pause=3)
-        pyautogui.click(awake_200)
+        pyautogui.click(awake_200,duration=2)
         time.sleep(4)
 
     # 自动更换狗粮
@@ -129,6 +129,7 @@ class Adventure(Personal):
                 if Adventure.in_adventure_home():
                     break
                 feat, append_power = Adventure.activate(exp)
+
                 log.info("扫怪结束...")
                 if append_power:
                     log.info("体力已耗尽 需要补充体力，结束探索")
