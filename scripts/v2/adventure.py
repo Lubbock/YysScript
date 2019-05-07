@@ -30,7 +30,7 @@ class Adventure(Personal):
         if MapCv.append_power():
             log.info("体力已经耗尽，程序运行停止...")
             exit(300)
-
+        time.sleep(2)
         if MapCv.wait_adventure():
             click(move_right)
             return
@@ -70,7 +70,7 @@ class Adventure(Personal):
 
         pyautogui.click(1048, 558, pause=2)
         log.info("开始探索\n_________________________________")
-        time.sleep(30)
+        time.sleep(20)
         while not MapCv.end_adventure():
             log.info("打怪中....")
             time.sleep(5)
