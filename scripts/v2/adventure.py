@@ -30,7 +30,11 @@ class Adventure(Personal):
         if MapCv.append_power():
             log.info("体力已经耗尽，程序运行停止...")
             exit(300)
-        time.sleep(2)
+
+        if MapCv.wait_adventure():
+            click(move_right)
+            return
+        time.sleep(1)
         location_points = MapCv.location_multiscreen("满.png")
         change_dog = False
         if len(location_points) > 1:
@@ -134,8 +138,11 @@ class Adventure(Personal):
                         lock_wait("探索退出.png", after_action=click(49, 121))
                         time.sleep(2)
                         click(686, 419)
-                        lock_wait("首页.png")
                         time.sleep(4)
+                        if MapCv.start_adventure():
+                            break
+                        if MapCv.__in_screenshot__("首页.png"):
+                            lock_click(last_adventure, lock_img="start_adventure.png")
                         log.info("------------------------------\n")
                         break
 
