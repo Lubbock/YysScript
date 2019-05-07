@@ -1,7 +1,7 @@
 from Personal import Personal
 import pyautogui
 import time
-
+from Personal import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
 
@@ -11,7 +11,7 @@ ghost_100 = 674, 617
 
 pre_button = 1024, 536
 pre_end = 217, 452
-log = Logger().getlog()
+
 
 
 class Dogger(Personal):

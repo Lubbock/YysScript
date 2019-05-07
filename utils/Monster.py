@@ -3,9 +3,7 @@ import numpy
 import numpy as np
 import pyautogui
 
-from utils.Logger import Logger
-
-log = Logger().getlog()
+from Personal import *
 
 
 class Monster:
@@ -98,7 +96,8 @@ class Monster:
             p += 1
             x_real = int((x + w / 2) * 2)
             y_real = int((y + h / 2) * 2)
-            point.append((x_real, y_real))
+            if y_real < 400:
+                point.append((x_real, y_real))
         return point
 
     @staticmethod
@@ -120,12 +119,14 @@ class Monster:
                             tem = abs(m_x - x)
                             min_monster = [m_x, m_y, m_w, m_h, x, y, w, h]
                 if min_monster is not None:
-                    exp_monsters.append(min_monster)
+                    if min_monster[1] < 300:
+                        exp_monsters.append(min_monster)
                 tem = 9999
         return exp_monsters
 
     @staticmethod
     def lock_monster_exp():
+        log.info("查找经验怪")
         frame = pyautogui.screenshot()
         frame = cv2.cvtColor(numpy.asarray(frame), cv2.COLOR_RGB2BGR)
         frame = cv2.resize(frame, (640, 400), interpolation=cv2.INTER_CUBIC)
@@ -140,7 +141,7 @@ class Monster:
 
     @staticmethod
     def lock_monster():
-
+        log.info("查找普通怪")
         # frame = cv2.imread('scc.png')
         frame = pyautogui.screenshot()
         frame = cv2.cvtColor(numpy.asarray(frame), cv2.COLOR_RGB2BGR)

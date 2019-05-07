@@ -1,7 +1,7 @@
 from Personal import Personal
 import pyautogui
 import time
-
+from Personal import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
 from utils.Monster import Monster
@@ -14,7 +14,6 @@ pre_activate = 975, 531
 
 start_activate = 1039, 548
 
-log = Logger().getlog()
 
 
 # 御心道场

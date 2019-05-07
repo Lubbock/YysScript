@@ -1,14 +1,13 @@
 from Personal import Personal
 import pyautogui
 import time
-
+from Personal import *
 from utils.ActionPoint import ActionPoint
 from utils.Logger import Logger
 
 soul_50 = 320, 381
 soul_100 = 840, 502
 soul_200 = 558, 533
-log = Logger().getlog()
 
 class Soul(Personal):
 

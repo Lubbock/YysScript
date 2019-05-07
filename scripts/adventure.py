@@ -1,4 +1,4 @@
-from Personal import Personal
+from Personal import *
 import pyautogui
 import time
 
@@ -11,7 +11,6 @@ adventure_200 = 831, 540
 move_right = 674, 590
 move_left = 476, 565
 awake_200 = 558, 533
-log = Logger().getlog()
 
 
 class Adventure(Personal):
@@ -44,7 +43,7 @@ class Adventure(Personal):
             time.sleep(pause)
         log.info("打怪完成,返回主图...")
         pyautogui.click(awake_200, pause=3)
-        pyautogui.click(awake_200,duration=2)
+        pyautogui.click(awake_200, duration=2)
         time.sleep(4)
 
     # 自动更换狗粮
@@ -90,9 +89,8 @@ class Adventure(Personal):
 
     @staticmethod
     def next_dog():
-        pyautogui.moveTo(175,673)
+        pyautogui.moveTo(175, 673)
         pyautogui.dragTo(788, 674, 2)
-
 
     # 校验是不是已经回到主页了
     @staticmethod
