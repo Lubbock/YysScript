@@ -16,17 +16,19 @@ def click(x=None, y=None, clicks=1, interval=0.0, button='left', duration=0.0, p
 
 def lock_wait(lock_img=None, wait_time=2, max_timeout=30, after_action=None, loop_action=None):
     timeout = 0
+    lock = True
     while not MapCv.__in_screenshot__(lock_img):
         if loop_action is not None:
-            loop_action(1)
             loop_action(1)
         time.sleep(wait_time)
         timeout += wait_time
         if timeout > max_timeout:
-            log.error("程序已等待进入{} -{}秒，脚本停止运行".format(lock_img,max_timeout))
-            exit(300)
+            log.error("程序已等待进入{} -{}秒，脚本停止运行".format(lock_img, max_timeout))
+            lock = False
+            break
     if after_action is not None:
         after_action(1)
+    return lock
 
 
 def lock_wait_lost(lock_img=None, wait_time=2, max_timeout=30, after_action=None, loop_action=None):

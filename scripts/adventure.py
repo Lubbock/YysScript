@@ -89,6 +89,10 @@ class Adventure(Personal):
         log.info("开始探索\n_________________________________")
         time.sleep(30)
         while not MapCv.end_adventure():
+            if MapCv.__in_screenshot__("start_adventure.png"):
+                break
+            if MapCv.__in_screenshot__("首页.png"):
+                break
             log.info("打怪中....")
             time.sleep(5)
         log.info("打怪完成\n##################################")

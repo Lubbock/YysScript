@@ -4,6 +4,7 @@ import time
 from Personal import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
+from Personal import *
 
 dogger_100 = 216, 619
 ghost_girl = 428, 402
@@ -36,8 +37,9 @@ class Dogger(Personal):
     @staticmethod
     def start(timer=30):
         for i in range(0, timer):
+            log.info("第{}次".format(i))
             pyautogui.click(dogger_100, pause=1)
-            screen = MapCv.location_screen("骨女.png")
+            screen = MapCv.location_screen("日和仿.png")
             pyautogui.click(screen, pause=1)
             pyautogui.click(ghost_100)
             Dogger.loop_pre()
