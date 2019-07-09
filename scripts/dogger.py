@@ -31,6 +31,7 @@ class Dogger(Personal):
     @staticmethod
     def loop_end():
         while not MapCv.__in_screenshot__("妖气封印打完_2.png"):
+            pyautogui.click(pre_button)
             time.sleep(2)
         pyautogui.click(pre_end, pause=2)
 
@@ -39,7 +40,7 @@ class Dogger(Personal):
         for i in range(0, timer):
             log.info("第{}次".format(i))
             pyautogui.click(dogger_100, pause=1)
-            screen = MapCv.location_screen("日和仿.png")
+            screen = MapCv.location_screen("小松丸.png")
             pyautogui.click(screen, pause=1)
             pyautogui.click(ghost_100)
             Dogger.loop_pre()
