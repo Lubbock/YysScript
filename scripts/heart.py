@@ -1,10 +1,9 @@
-from Personal import Personal
+from scripts.Personal import Personal
 import pyautogui
 import time
 
 from utils.Logger import Logger
 from utils.MapCv import MapCv
-from utils.Monster import Monster
 
 # 简单觉醒
 start_yuhun = 384, 367

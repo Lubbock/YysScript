@@ -1,4 +1,4 @@
-from Personal import Personal
+from scripts.Personal import Personal
 from utils.ActionPoint import ActionPoint
 import pyautogui
 import time

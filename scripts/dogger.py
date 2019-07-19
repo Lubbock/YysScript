@@ -1,4 +1,4 @@
-from Personal import Personal
+from scripts.Personal import Personal
 import pyautogui
 import time
 

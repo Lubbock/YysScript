@@ -1,4 +1,4 @@
-from Personal import *
+from scripts.Personal import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
 from utils.Monster import Monster

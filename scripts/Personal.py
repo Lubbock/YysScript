@@ -13,9 +13,9 @@ def click(x=None, y=None, clicks=1, interval=0.0, button='left', duration=0.0, p
     pyautogui.click(x, y, clicks, interval, button, duration, pause, _pause)
 
 
-def lock_wait(lock_img=None, wait_time=2, max_timeout=30, after_action=None, loop_action=None):
+def lock_wait(lock_img=None, wait_time=2, max_timeout=30, after_action=None, loop_action=None, path="res/img/"):
     timeout = 0
-    while not MapCv.__in_screenshot__(lock_img):
+    while not MapCv.__in_screenshot__(lock_img, path=path):
         time.sleep(wait_time)
         timeout += wait_time
         if loop_action is not None:
