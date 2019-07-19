@@ -1,159 +1,174 @@
-from scripts.Personal import Personal
-import pyautogui
-import time
-
+from Personal import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
 from utils.Monster import Monster
 
+# 右下方选择副本的位置
 last_adventure = 1023, 597
 adventure_200 = 831, 540
 move_right = 674, 590
 move_left = 476, 565
 awake_200 = 558, 533
-log = Logger().getlog()
+import pyautogui
+
+
+def find_map():
+    pyautogui.scroll(3, 1008, 465, pause=1)
+
+    pyautogui.scroll(2, 1008, 465, pause=1)
+    pyautogui.scroll(2, 1008, 465, pause=1)
+    pyautogui.scroll(3, 1008, 465, pause=1)
+    for i in range(6):
+        pyautogui.scroll(-1, 1008, 465, pause=1)
+        pyautogui.scroll(-1, 1008, 465, pause=1)
+        screen = MapCv.location_screen("第九章.png", threshold=0.9)
+        if screen is not None:
+            pyautogui.click(screen)
+            break
+    time.sleep(4)
 
 
 class Adventure(Personal):
 
-    @staticmethod
-    def activate(exp=False):
-        wait_adventure = MapCv.wait_adventure()
-        if not wait_adventure:
-            time.sleep(2)
-        log.info("开始锁定怪物")
-        if exp:
-            monsters = Monster.lock_monster_exp()
-        else:
-            monsters = Monster.lock_monster()
-        feat = False
-        log.info("找到怪物 {} 个，开始进行处理".format(len(monsters)))
-        if len(monsters) > 0:
-            feat = True
-            pyautogui.click(monsters[0], pause=2)
-            log.info("=======================")
-            log.info(monsters[0])
-        else:
-            feat = False
-        return feat, MapCv.append_power()
+    def __init__(self, timer=-1, exp=False):
+        super().__init__()
+        self.timer = timer
+        self.exp = exp
+        self.adventure_retry = 34
+        self.max_page_num = 4  # 一次探索最多拖4下
+        self.page_click = 2  # 没有怪物的时候 一个地图定位两次
+        self.auto_power = False  # 自动补充体力
 
-    @staticmethod
-    def loop_checkend(pause=2):
-        while not MapCv.end_adventure():
-            log.info("打怪中....")
-            time.sleep(pause)
-        log.info("打怪完成,返回主图...")
-        pyautogui.click(awake_200, pause=3)
-        pyautogui.click(awake_200,duration=2)
-        time.sleep(4)
-
-    # 自动更换狗粮
-    @staticmethod
-    def loop_check_monster():
+    def activate(self, monster):
+        # 得到怪物的坐标点 开始打怪
+        log.info("开始点击monster {}.{}".format(monster[0], monster[1]))
+        lock_click(monster, pause=1, duration=0)
+        log.info("点击monster")
+        if MapCv.append_power():
+            log.info("体力已经耗尽，程序运行停止...")
+            exit(300)
         time.sleep(2)
-        while not MapCv.__in_screenshot__("准备2.png"):
-            time.sleep(2)
-
-        pyautogui.doubleClick(413, 558, duration=2, pause=2)
-
-        points = MapCv.location_multiscreen("满.png")
-
-        block_1 = 377
-        block_2 = 760
-
-        for point in points:
-            if point[1] < 400:
-                if block_1 < point[0] < block_2:
-                    Adventure.next_dog()
-                    time.sleep(2)
-                    pyautogui.moveTo(472, 572, pause=2)
-                    pyautogui.dragTo(point[0], point[1] + 100, 1)
-                    break
-                elif point[0] < block_1:
-                    Adventure.next_dog()
-                    time.sleep(2)
-                    pyautogui.moveTo(472, 572, pause=2)
-                    pyautogui.dragTo(point[0], point[1] + 100, 1)
-                    break
-
+        if MapCv.wait_adventure():
+            click(move_right)
+            return
         time.sleep(1)
-        pyautogui.click(1048, 558, duration=1)
-        time.sleep(2)
-        pyautogui.click(1048, 558, duration=1)
+        location_points = MapCv.location_multiscreen("满.png")
+        change_dog = False
+        if len(location_points) > 1:
+            for location_point in location_points:
+                if location_point[0] > 350:
+                    change_dog = True
 
-        # 狗粮大队长 在第三个格子
+        if change_dog:
+            lock_doubleclick(413, 558)
+            lock_wait("狗粮.png", loop_action=lambda x: lock_doubleclick(413, 558, pause=1))
 
-    @staticmethod
-    def next_page():
-        pyautogui.moveTo(558, 538)
-        pyautogui.dragTo(92, 519, 1)
+            # 替换狗粮大队长
+            log.info("------------------------开始替换狗粮")
+            points = MapCv.location_multiscreen("满.png")
+            log.info("查找狗粮是否需要替换")
+            block_1 = 377
+            block_2 = 760
 
-    @staticmethod
-    def next_dog():
-        pyautogui.moveTo(175,673)
-        pyautogui.dragTo(788, 674, 2)
-
-
-    # 校验是不是已经回到主页了
-    @staticmethod
-    def in_adventure_home():
-        start_adventure = MapCv.start_adventure()  # 二次探索的，首页，无宝箱，石距等等
-        # box = MapCv.__in_screenshot__("宝箱.png")  # 回到首页宝箱
-        # bigMonster = MapCv.__in_screenshot__("愤怒的石距.png")  # 回到首页石距
-        in_home = MapCv.__in_screenshot__("首页.png")
-        restart_adventure = False
-        if in_home:
-            log.info("正在主页面，重新进入探索地图")
-            pyautogui.click(last_adventure, pause=3)
-            restart_adventure = True
-        if start_adventure:
-            log.info("在探索主页，重新进入探索")
-            restart_adventure = True
-        return restart_adventure
-
-        # 回到首页
-        # 打完boss等着拿奖励
-
-    @staticmethod
-    def start(timer=10, exp=True):
-        pyautogui.click(last_adventure, pause=3)
-
-        for i in range(0, timer):
-            log.info("开始第{}次探索副本".format(i + 1))
-            pyautogui.click(adventure_200, pause=4)
-            Adventure.next_page()
-            activate_num = 0
-            next_page_num = 1
-            while True:
-                log.info("判断是否还在扫怪阶段,不是重新进入地图")
-                if Adventure.in_adventure_home():
-                    break
-                feat, append_power = Adventure.activate(exp)
-
-                log.info("扫怪结束...")
-                if append_power:
-                    log.info("体力已耗尽 需要补充体力，结束探索")
-                    exit()
-                if feat:
-                    log.info("开始第{}次探索副本,的第{}次小怪检索".format(i + 1, activate_num + 1))
-                    if MapCv.wait_adventure():
-                        # 如果没有开始打怪还在等待的地方，重新查找monster. 找到错误的monster需要重新搜索
-                        log.info("怪物定位出现问题，重新寻找")
-                        continue
-                    Adventure.loop_check_monster()
-                    # 不在检测的地方 说明已经在打怪了，等待
-                    activate_num += 1
-                    # 循环检测是否打完也怪
-                    Adventure.loop_checkend()
-                else:
-                    log.info("未查询到怪物，进入下一步地图查找")
-                    if next_page_num < 4:
-                        next_page_num += 1
-                        Adventure.next_page()
-                    else:
-                        pyautogui.click(49, 121)
-                        log.info("退出到主页")
+            for point in points:
+                if point[1] < 400:
+                    if block_1 < point[0] < block_2:
+                        next_dog()
                         time.sleep(2)
-                        pyautogui.click(686, 419)
-                        time.sleep(5)
+                        pyautogui.moveTo(472, 572, pause=1)
+                        pyautogui.dragTo(point[0], point[1] + 100, 1)
                         break
+                    elif point[0] < block_1:
+                        next_dog()
+                        time.sleep(2)
+                        pyautogui.moveTo(472, 572, pause=1)
+                        pyautogui.dragTo(point[0], point[1] + 100, 1)
+                        break
+
+        pyautogui.click(1048, 558, pause=2)
+        log.info("开始探索\n_________________________________")
+        time.sleep(30)
+        while not MapCv.end_adventure():
+            if MapCv.__in_screenshot__("start_adventure.png"):
+                break
+            if MapCv.__in_screenshot__("首页.png"):
+                break
+            log.info("打怪中....")
+            time.sleep(5)
+        log.info("打怪完成\n##################################")
+        time.sleep(7)
+        click(awake_200)
+        lock = lock_wait("wait_adventure.png", loop_action= lambda x: click(awake_200))
+        if not lock:
+            click(awake_200)
+        log.info("退出单次打怪页面....")
+        # 判断当前所在页面
+        time.sleep(4)
+        if MapCv.start_adventure():  # 如果在开始探索页面 如果有boss奖励就拿，然后退出，重新进入探索模式 没有就继续下一次找怪
+            # 判断是不是boss奖励不是继续探索
+            boss_awards = MapCv.location_screen("boos奖励.png")
+            if boss_awards is None or len(boss_awards) == 0:
+                log.info("啥都没有")
+            else:
+                for award in boss_awards:
+                    click(award)
+                    time.sleep(1)
+                    click(award)
+                time.sleep(3)
+                log.info("奖励领取完成....")
+                time.sleep(3)
+                log.info("重新进入探索页面")
+                if MapCv.__in_screenshot__("首页.png"):  # 如果在首页 判断是不是有石距，或者宝箱
+                    # box = MapCv.__in_screenshot__("宝箱.png")  # 回到首页宝箱
+                    # bigMonster = MapCv.__in_screenshot__("愤怒的石距.png")  # 回到首页石距
+                    lock_click(last_adventure, lock_img="start_adventure.png")
+
+        if MapCv.__in_screenshot__("首页.png"):  # 如果在首页 判断是不是有石距，或者宝箱
+            # box = MapCv.__in_screenshot__("宝箱.png")  # 回到首页宝箱
+            # bigMonster = MapCv.__in_screenshot__("愤怒的石距.png")  # 回到首页石距
+            lock_click(last_adventure, lock_img="start_adventure.png")
+
+    def start(self):
+        # lock_wait("wait_adventure.png")
+       # find_map()
+        lock_click(last_adventure, lock_img="start_adventure.png")
+        log.info("已经进入探索副本，开始进行自动扫怪")
+        for i in range(self.timer):
+            lock_click(adventure_200, lock_img="wait_adventure.png")
+            log.info("第{}次探索副本开始\n--------------------------------".format(i + 1))
+            next_page()
+            while True:
+                page_num = 0
+                lost_monster = 0
+                for retry in range(self.adventure_retry):
+                    monsters = Monster.lock_monster_exp() if self.exp else Monster.lock_monster()
+
+                    log.info("当前在地图第{}页,已定位怪物数量{}".format(page_num, len(monsters)))
+                    if len(monsters) > 0:
+                        lost_monster = 0
+                        print(monsters)
+                        self.activate(monsters[0])
+                    else:
+                        # 未定位到怪物进入下一页
+                        lost_monster += 1
+                        log.info("第{}次，未找到怪兽".format(lost_monster))
+                        if lost_monster > 1:
+                            log.info("进入下一页寻找怪兽")
+                            page_num += 1
+                            next_page()
+                            lost_monster = 0
+                    if page_num > self.max_page_num:
+                        log.info("已经第4次拖图，结束本次探索")
+                        lock_wait("探索退出.png", after_action=click(49, 121))
+                        time.sleep(2)
+                        click(686, 419)
+                        time.sleep(4)
+                        if MapCv.start_adventure():
+                            break
+                        if MapCv.__in_screenshot__("首页.png"):
+                            #find_map()
+                            lock_click(last_adventure, lock_img="start_adventure.png")
+                        log.info("------------------------------\n")
+                        break
+
+                break

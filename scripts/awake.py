@@ -2,7 +2,7 @@ from scripts.Personal import Personal
 from utils.ActionPoint import ActionPoint
 import pyautogui
 import time
-
+from Personal import *
 # 成功
 from utils.Logger import Logger
 from utils.MapCv import MapCv
@@ -12,7 +12,6 @@ awake_200 = 558, 533
 awake_100 = 840, 502
 
 pre_button = 1024, 536
-log = Logger().getlog()
 
 
 class Awake(Personal):

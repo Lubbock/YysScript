@@ -1,9 +1,10 @@
 from scripts.Personal import Personal
 import pyautogui
 import time
-
+from Personal import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
+from Personal import *
 
 dogger_100 = 216, 619
 ghost_girl = 428, 402
@@ -11,7 +12,7 @@ ghost_100 = 674, 617
 
 pre_button = 1024, 536
 pre_end = 217, 452
-log = Logger().getlog()
+
 
 
 class Dogger(Personal):
@@ -30,14 +31,16 @@ class Dogger(Personal):
     @staticmethod
     def loop_end():
         while not MapCv.__in_screenshot__("妖气封印打完_2.png"):
+            pyautogui.click(pre_button)
             time.sleep(2)
         pyautogui.click(pre_end, pause=2)
 
     @staticmethod
     def start(timer=30):
         for i in range(0, timer):
+            log.info("第{}次".format(i))
             pyautogui.click(dogger_100, pause=1)
-            screen = MapCv.location_screen("骨女.png")
+            screen = MapCv.location_screen("小松丸.png")
             pyautogui.click(screen, pause=1)
             pyautogui.click(ghost_100)
             Dogger.loop_pre()
