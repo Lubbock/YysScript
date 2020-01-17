@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>上传文件</title>
+</head>
+<body>
+{# 但凡form中涉及到了上传文件，那么method = 'post' 和 enctype = 'multipart/form-data'#}
+{# 当没有指定提交路劲时，默认向当前页面提交#}
+<form action="" method="post" enctype="multipart/form-data">
+<table>
+    <tr>
+        <td>头像：</td>
+        <td><input type="file" name="pichead"></td>
+    </tr>
+    <tr>
+        <td>心情：</td>
+       <td><input type="text" name="desc"></td>
+    </tr>
+    <tr>
+        <td></td>
+       <td><input type="submit" value="提交"></td>
+    </tr>
+</table>
+</form>
+</body>
+</html>
