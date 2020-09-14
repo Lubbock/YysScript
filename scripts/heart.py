@@ -1,7 +1,7 @@
-from scripts.Personal import Personal
+from scripts.a_base import Personal
 import pyautogui
 import time
-from Personal import *
+from .a_base import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
 

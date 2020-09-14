@@ -1,8 +1,8 @@
-from scripts.Personal import Personal
+from scripts.a_base import Personal
 from utils.ActionPoint import ActionPoint
 import pyautogui
 import time
-from Personal import *
+from scripts.a_base import *
 # 成功
 from utils.Logger import Logger
 from utils.MapCv import MapCv

@@ -3,8 +3,7 @@ import numpy
 import numpy as np
 import pyautogui
 
-from Personal import *
-
+from scripts.a_base import *
 
 class Monster:
 
@@ -15,7 +14,7 @@ class Monster:
         kernel_4 = np.ones((4, 4), np.uint8)  # 4x4的卷积核
         kernel_8 = np.ones((8, 8), np.uint8)  # 4x4的卷积核
         # 灰色识别
-        lower_blue = np.array([15, 59, 170])
+        lower_blue = np.array([5, 59, 170])
         upper_blue = np.array([20, 91, 202])
         mask = cv2.inRange(hsv, lower_blue, upper_blue)
         # 去噪点，铺平

@@ -10,7 +10,7 @@ log = Logger().getlog()
 
 
 def click(x=None, y=None, clicks=1, interval=0.0, button='left', duration=0.0, pause=None, _pause=True):
-    pyautogui.click(x=x, y=y, clicks=clicks, interval=interval, button=button, duration=duration, pause=pause,
+    pyautogui.click(x=x, y=y, clicks=clicks, interval=interval, button=button, duration=duration,
                     _pause=_pause)
 
 

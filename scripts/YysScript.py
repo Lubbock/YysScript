@@ -1,4 +1,4 @@
-from Personal import *
+from scripts.a_base import *
 from scripts.adventure import Adventure
 from scripts.dogger import Dogger
 from scripts.fight import Fight

@@ -1,0 +1,97 @@
+# -*- coding: utf-8 -*-
+
+# Form implementation generated from reading ui file 'Hew.ui'
+#
+# Created by: PyQt5 UI code generator 5.13.0
+#
+# WARNING! All changes made in this file will be lost!
+
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+
+class Ui_MainWindow(object):
+    def setupUi(self, MainWindow):
+        MainWindow.setObjectName("MainWindow")
+        MainWindow.resize(609, 291)
+        self.centralwidget = QtWidgets.QWidget(MainWindow)
+        self.centralwidget.setObjectName("centralwidget")
+        self.label = QtWidgets.QLabel(self.centralwidget)
+        self.label.setGeometry(QtCore.QRect(10, 20, 225, 45))
+        font = QtGui.QFont()
+        font.setPointSize(27)
+        self.label.setFont(font)
+        self.label.setObjectName("label")
+        self.widget = QtWidgets.QWidget(self.centralwidget)
+        self.widget.setGeometry(QtCore.QRect(11, 83, 513, 30))
+        self.widget.setObjectName("widget")
+        self.horizontalLayout = QtWidgets.QHBoxLayout(self.widget)
+        self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
+        self.horizontalLayout.setObjectName("horizontalLayout")
+        self.lineEdit = QtWidgets.QLineEdit(self.widget)
+        self.lineEdit.setObjectName("lineEdit")
+        self.horizontalLayout.addWidget(self.lineEdit)
+        self.label_2 = QtWidgets.QLabel(self.widget)
+        self.label_2.setObjectName("label_2")
+        self.horizontalLayout.addWidget(self.label_2)
+        self.pushButton = QtWidgets.QPushButton(self.widget)
+        self.pushButton.setObjectName("pushButton")
+        self.horizontalLayout.addWidget(self.pushButton)
+        self.lineEdit_2 = QtWidgets.QLineEdit(self.widget)
+        self.lineEdit_2.setObjectName("lineEdit_2")
+        self.horizontalLayout.addWidget(self.lineEdit_2)
+        self.label_3 = QtWidgets.QLabel(self.widget)
+        self.label_3.setObjectName("label_3")
+        self.horizontalLayout.addWidget(self.label_3)
+        MainWindow.setCentralWidget(self.centralwidget)
+        self.menubar = QtWidgets.QMenuBar(MainWindow)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 609, 26))
+        self.menubar.setObjectName("menubar")
+        self.menu = QtWidgets.QMenu(self.menubar)
+        self.menu.setObjectName("menu")
+        self.menufile = QtWidgets.QMenu(self.menu)
+        self.menufile.setObjectName("menufile")
+        MainWindow.setMenuBar(self.menubar)
+        self.statusbar = QtWidgets.QStatusBar(MainWindow)
+        self.statusbar.setObjectName("statusbar")
+        MainWindow.setStatusBar(self.statusbar)
+        self.actionfly = QtWidgets.QAction(MainWindow)
+        self.actionfly.setObjectName("actionfly")
+        self.actioncar = QtWidgets.QAction(MainWindow)
+        self.actioncar.setObjectName("actioncar")
+        self.actiontxt = QtWidgets.QAction(MainWindow)
+        self.actiontxt.setObjectName("actiontxt")
+        self.actionjava = QtWidgets.QAction(MainWindow)
+        self.actionjava.setObjectName("actionjava")
+        self.actionpython = QtWidgets.QAction(MainWindow)
+        self.actionpython.setObjectName("actionpython")
+        self.actiongolang = QtWidgets.QAction(MainWindow)
+        self.actiongolang.setObjectName("actiongolang")
+        self.menufile.addAction(self.actiontxt)
+        self.menufile.addAction(self.actionjava)
+        self.menufile.addAction(self.actionpython)
+        self.menufile.addAction(self.actiongolang)
+        self.menu.addAction(self.menufile.menuAction())
+        self.menu.addAction(self.actionfly)
+        self.menu.addSeparator()
+        self.menu.addAction(self.actioncar)
+        self.menubar.addAction(self.menu.menuAction())
+
+        self.retranslateUi(MainWindow)
+        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+
+    def retranslateUi(self, MainWindow):
+        _translate = QtCore.QCoreApplication.translate
+        MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
+        self.label.setText(_translate("MainWindow", "汇率转换器"))
+        self.label_2.setText(_translate("MainWindow", "USD"))
+        self.pushButton.setText(_translate("MainWindow", "转换"))
+        self.label_3.setText(_translate("MainWindow", "CNY"))
+        self.menu.setTitle(_translate("MainWindow", "新建"))
+        self.menufile.setTitle(_translate("MainWindow", "file"))
+        self.actionfly.setText(_translate("MainWindow", "fly"))
+        self.actioncar.setText(_translate("MainWindow", "car"))
+        self.actiontxt.setText(_translate("MainWindow", "txt"))
+        self.actionjava.setText(_translate("MainWindow", "java"))
+        self.actionpython.setText(_translate("MainWindow", "python"))
+        self.actiongolang.setText(_translate("MainWindow", "golang"))

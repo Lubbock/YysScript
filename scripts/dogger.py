@@ -1,10 +1,10 @@
-from scripts.Personal import Personal
+from scripts.a_base import Personal
 import pyautogui
 import time
-from Personal import *
+from scripts.a_base import *
 from utils.Logger import Logger
 from utils.MapCv import MapCv
-from Personal import *
+from scripts.a_base import *
 
 dogger_100 = 216, 619
 ghost_girl = 428, 402

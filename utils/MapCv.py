@@ -20,7 +20,7 @@ class MapCv:
         return MapCv.__in_screenshot__('购买体力.png')
 
     @staticmethod
-    def __in_screenshot__(filename, threshold=0.7, path="res/img/"):
+    def __in_screenshot__(filename, threshold=0.7,  path="E:/github/YysScript/res/img/"):
         img = pyautogui.screenshot()
         img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -36,7 +36,7 @@ class MapCv:
         return match
 
     @staticmethod
-    def location_screen(filename, threshold=0.7, path="res/img/"):
+    def location_screen(filename, threshold=0.7, path="E:/github/YysScript/res/img/"):
         img = pyautogui.screenshot()
         img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -49,7 +49,7 @@ class MapCv:
         loc = np.where(res >= threshold)
         match = False
         for pt in zip(*loc[::-1]):  # *号表示可选参数
-            return (pt[0] + w) / 2, (pt[1] + h) / 2
+            return (pt[0] + w), (pt[1] + h)
         return None
 
     @staticmethod
@@ -67,7 +67,7 @@ class MapCv:
         match = False
         points = []
         for pt in zip(*loc[::-1]):  # *号表示可选参数
-            point = (pt[0] + w) / 2, (pt[1] + h) / 2
+            point = (pt[0] + w) , (pt[1] + h)
             points.append(point)
         return points
 

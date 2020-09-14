@@ -19,7 +19,7 @@ class Logger(object):
         # 创建一个handler，用于写入日志文件
         self.log_time = time.strftime("%Y_%m_%d_")
         self.log_path = "logger/"
-        self.log_name = self.log_path + self.log_time + 'test.log'
+        self.log_name =  'E:\\github\\YysScript\\test.log'
 
         fh = logging.FileHandler(self.log_name, 'a')  # 追加模式  这个是python2的
         # fh = logging.FileHandler(self.log_name, 'a', encoding='utf-8')  # 这个是python3的

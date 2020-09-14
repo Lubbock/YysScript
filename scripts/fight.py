@@ -1,6 +1,6 @@
 import math
 
-from Personal import *
+from scripts.a_base import *
 
 from utils.MapCv import MapCv
 from utils.Monster import Monster
