@@ -24,22 +24,18 @@ class Aband3t(Personal):
         click(w - 40, h - 40, _pause=1, duration=1)
         time.sleep(2)
         for i in range(loopNum):
-            j = 1
+            evt = ExitEvent(20)
             while not MapCv.__in_screenshot__("Aband3t-3.png"):
-                j += 1
-                if j > 20:
-                    log.info("end... -3")
-                    exit(300)
+                evt.start_event()
+                log.info("evt leave ...-3")
                 time.sleep(2)
             w, h = MapCv.location_screen("Aband3t-3.png")
             click(w - 40, h - 40, _pause=1, duration=1)
             time.sleep(40)
-            j = 1
+            evt = ExitEvent(50)
             while not MapCv.__in_screenshot__("Aband3t-2.png"):
-                j += 1
-                if j > 50:
-                    log.info("end... -2")
-                    exit(300)
+                evt.start_event()
+                log.info("end... -2")
                 time.sleep(5)
             w, h = MapCv.location_screen("Aband3t-2.png")
             click(w - 40, h - 40, _pause=1, duration=1)

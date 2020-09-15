@@ -73,6 +73,16 @@ def next_dog():
     pyautogui.dragTo(788, 674, 2)
 
 
+class ExitEvent:
+    def __init__(self, exit_count):
+        self.exit_count = exit_count
+
+    def start_event(self):
+        self.exit_count = self.exit_count - 1
+        if self.exit_count <= 0:
+            exit(300)
+
+
 class Personal:
     def __init__(self):
         pyautogui.FAILSAFE = False
