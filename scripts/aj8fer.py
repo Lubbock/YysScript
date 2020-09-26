@@ -19,6 +19,8 @@ def location_screen(*args, **kwargs):
 class Aj8fer(Personal):
     @staticmethod
     def complete0001(loopNum):
+        wp = WaitPredication()
+        twp = wp.get_predication("Aj8fer-1")
         log.info("开始事件Aj8fer-0001")
         for i in range(loopNum):
             evt = ExitEvent(20)
@@ -26,19 +28,20 @@ class Aj8fer(Personal):
                 evt.start_event()
                 log.info("evt leave ...-3")
                 time.sleep(2)
-
             w, h = location_screen("Aj8fer-1.png")
             click(w, h, _pause=1, duration=1)
-            time.sleep(45)
-            evt = ExitEvent(150)
+            wp = WaitPredication()
+            twp = wp.get_predication("Aj8fer-1")
+            log.info("Aj8fer-1 预测时间" + str(twp))
+            time.sleep(int(twp))
             while not MapCv.__in_screenshot__("Aband3t-2.png"):
                 # evt.start_event()
-                log.info("end... -2")
+                log.info("程序正在执行中，未检测到结束状态")
                 time.sleep(3)
-            time.sleep(3)
+            wp.record("Aj8fer-1")
             w, h = MapCv.location_screen("Aband3t-2.png")
             click(w, h, _pause=1, duration=1)
-            time.sleep(2)
+            time.sleep(1)
         log.info("结束事件Aj8fer-0001")
 
     @staticmethod

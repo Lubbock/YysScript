@@ -5,6 +5,9 @@ import pyautogui
 from utils.Logger import Logger
 from utils.MapCv import MapCv
 import random
+import datetime
+from utils.grayscaness import SqlScan
+import numpy as np
 
 log = Logger().getlog()
 
@@ -87,3 +90,48 @@ class Personal:
     def __init__(self):
         pyautogui.FAILSAFE = False
         pyautogui.PAUSE = 0.2
+
+
+class StopWatch:
+    def __init__(self):
+        self.sw_map = {}
+        self.sw_end = {}
+
+    def start(self, kw):
+        start = datetime.datetime.now()
+        self.sw_map[kw] = start
+        self.sw_end[kw] = start
+        log.info(kw + " start watch ")
+
+    def end(self, kw):
+        end = datetime.datetime.now()
+        start = self.sw_map[kw]
+        self.sw_end[kw] = end
+        print(kw + " 时间" + str((end - start).seconds) + "秒")
+        return (end - start).seconds
+
+    def duration(self, kw):
+        start = self.sw_map[kw]
+        end = self.sw_end[kw]
+        print(kw + " 时间" + str((end - start).seconds) + "秒")
+        return (end - start).seconds
+
+
+class WaitPredication:
+
+    def __init__(self):
+        self.sw = StopWatch()
+
+    """
+    得到预测后的值
+    """
+    def get_predication(self, kw, dp_num=20):
+        p_nums = SqlScan.list_gray_scan(kw)
+        self.sw.start(kw)
+        if len(p_nums) == 0:
+            return dp_num
+        return np.average(p_nums) + 1
+
+    def record(self, kw):
+        wp = self.sw.end(kw)
+        SqlScan.gray_scan(kw, wp)
