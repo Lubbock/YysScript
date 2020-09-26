@@ -16,50 +16,36 @@ def location_screen(*args, **kwargs):
     log.info("location screen...")
 
 
-class Aband3t(Personal):
-
-    @staticmethod
-    def complete00000():
-        log.info("开始事件Aband3t-0000")
-        w, h = location_screen("Aband3t-0.png")
-        log.info(w)
-        pyautogui.moveTo(w, h)
-        pyautogui.click(w, h)
-        log.info("结束事件Aband3t-0000")
-
+class Aj8fer(Personal):
     @staticmethod
     def complete0001(loopNum):
-        log.info("开始事件Aband3t-0001")
-        # w, h = location_screen("Aband3t-1.png")
-        # log.info(w)
-        # pyautogui.moveTo(w + 60, h)
-        # click(w+60, h, _pause=1, duration=1)
-        # time.sleep(2)
+        log.info("开始事件Aj8fer-0001")
         for i in range(loopNum):
             evt = ExitEvent(20)
-            while not MapCv.__in_screenshot__("Aband3t-3.png"):
+            while not MapCv.__in_screenshot__("Aj8fer-1.png"):
                 evt.start_event()
                 log.info("evt leave ...-3")
                 time.sleep(2)
-            w, h = location_screen("Aband3t-3.png")
+
+            w, h = location_screen("Aj8fer-1.png")
             click(w, h, _pause=1, duration=1)
-            time.sleep(120)
+            time.sleep(45)
             evt = ExitEvent(150)
             while not MapCv.__in_screenshot__("Aband3t-2.png"):
                 # evt.start_event()
                 log.info("end... -2")
-                time.sleep(10)
+                time.sleep(3)
+            time.sleep(3)
             w, h = MapCv.location_screen("Aband3t-2.png")
             click(w, h, _pause=1, duration=1)
             time.sleep(2)
-
-        log.info("结束事件Aband3t-0001")
+        log.info("结束事件Aj8fer-0001")
 
     @staticmethod
     def start_event():
-        Aband3t.complete0001(20)
+        Aj8fer.complete0001(101)
 
 
 if __name__ == "__main__":
-    log.info("开始事件 band3t")
-    Aband3t.start_event()
+    log.info("开始事件 j8fer")
+    Aj8fer.start_event()

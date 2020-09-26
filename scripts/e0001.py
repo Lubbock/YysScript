@@ -15,6 +15,5 @@ def complete00001():
     pyautogui.dragTo(10, 20)
 
 
-
 if __name__ == "__main__":
     complete00001()
