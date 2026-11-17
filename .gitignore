@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# 运行时产物：日志、sqlite 数据库
+var/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store

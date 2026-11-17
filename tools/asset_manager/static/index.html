@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YysScript 模板管理</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>模板图片管理<small id="hdr-sub">加载中…</small></h1>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="toolbar">
+  <input type="search" id="q" placeholder="搜索状态 key / 中文名 / 模板文件名…">
+  <select id="f-kind">
+    <option value="">全部类型</option>
+    <option value="screen">界面状态 SCREEN</option>
+    <option value="marker">定位标记 MARKER</option>
+  </select>
+  <select id="f-flow"><option value="">全部流程</option></select>
+  <label class="check"><input type="checkbox" id="f-missing"> 只看缺失</label>
+  <label class="check"><input type="checkbox" id="f-unused"> 只看未被流程引用</label>
+  <span class="spacer"></span>
+  <button id="btn-capture" title="截取当前屏幕，然后框选区域存成新模板">📷 截屏裁剪新模板</button>
+  <button id="btn-reload">↻ 刷新</button>
+</div>
+
+<main>
+  <div class="grid" id="grid"></div>
+  <div id="orphans"></div>
+</main>
+
+<!-- 状态详情抽屉 -->
+<div id="drawer-root"></div>
+
+<!-- 裁剪工作区 -->
+<div id="crop-root"></div>
+
+<div id="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
