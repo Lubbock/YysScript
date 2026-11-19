@@ -42,9 +42,14 @@ class GameController:
     ) -> None:
         self.window = window or create_window()
         self.mouse = mouse or HumanMouse()
+        # macOS 事件直投：点击只送进游戏/镜像进程，不抢用户光标与焦点
+        self.mouse.pid_provider = self._window_pid
         self._viewport = viewport
         # 截屏区域绑定到游戏窗口：只截窗口，既快又能避免桌面其它窗口造成误匹配
-        self.capture = ScreenCapture(region_provider=self._region)
+        self.capture = ScreenCapture(
+            region_provider=self._region,
+            window_id_provider=self._window_id,
+        )
         self.matcher = TemplateMatcher(capture=self.capture)
         self.detector = MonsterDetector(capture=self.capture, debug=debug)
 
@@ -54,6 +59,22 @@ class GameController:
             return self.window.region
         except Exception as exc:  # 窗口丢失时退回全屏截图
             log.warning("获取窗口区域失败，改用全屏截图: %s", exc)
+            return None
+
+
+    def _window_id(self) -> Optional[int]:
+        """macOS 镜像窗口编号；其它平台 / 未定位时为 None。"""
+        try:
+            return self.window.wid
+        except Exception as exc:
+            log.debug("获取窗口编号失败: %s", exc)
+            return None
+    def _window_pid(self) -> Optional[int]:
+        """目标进程 PID（事件直投）；不可用时 None。"""
+        try:
+            return self.window.pid
+        except Exception as exc:
+            log.debug("获取窗口 PID 失败: %s", exc)
             return None
 
     @property

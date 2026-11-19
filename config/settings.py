@@ -59,6 +59,11 @@ GAME_WINDOW_CLASS: str = "Win32Window"
 #: 找不到游戏窗口时的行为：True = 退化为「整个屏幕就是客户区」（兼容模拟器 / mac）。
 FALLBACK_TO_FULLSCREEN: bool = True
 
+#: macOS 下默认按进程名定位的窗口：系统自带「iPhone Mirroring」（iPhone 镜像）窗口，
+#: 窗口内容即连到 Mac 的 iOS 设备屏幕，窗口内的点击会直接透传到手机。
+#: 可用环境变量 YYS_MAC_WINDOW_PROCESS 覆盖。
+MAC_WINDOW_PROCESS: str = os.environ.get("YYS_MAC_WINDOW_PROCESS", "iPhone Mirroring")
+
 #: 人工校准偏移量 (dx, dy)。换算后的屏幕坐标会再加上它，
 #: 用于修正客户端边框、DPI 缩放等造成的整体偏差。
 CALIBRATION_OFFSET: Tuple[int, int] = (0, 0)
@@ -75,6 +80,16 @@ STRICT_THRESHOLD: float = 0.90
 MAX_MATCHES: int = 32
 #: 匹配结果非极大值抑制的合并距离（像素），去掉同一个按钮的重复命中
 MATCH_MERGE_DISTANCE: int = 12
+
+#: 模板匹配尺度候选。运行截屏与模板采集尺度不一致时（例如 macOS 上截 iOS 镜像窗口），
+#: 逐个尺度缩放模板尝试匹配，取置信度最高的命中。
+#: 可用环境变量 YYS_TEMPLATE_SCALES 覆盖，例如 "1.0,0.8,0.6"。
+TEMPLATE_SCALES: Tuple[float, ...] = (
+    (1.0,) if os.name == "nt" else (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3)
+)
+_ENV_SCALES = os.environ.get("YYS_TEMPLATE_SCALES")
+if _ENV_SCALES:
+    TEMPLATE_SCALES = tuple(float(item) for item in _ENV_SCALES.split(",") if item.strip())
 
 
 # --------------------------------------------------------------------------- #

@@ -61,7 +61,7 @@ def test_info_shape(env):
     for key in ("capture", "capture_error", "match", "match_error"):
         assert key in data["capabilities"], "capabilities 缺字段: {}".format(key)
 
-    assert data["counts"]["states"] == 34
+    assert data["counts"]["states"] == 37
     assert data["counts"]["screen"] + data["counts"]["marker"] == data["counts"]["states"]
     assert isinstance(data["capabilities"]["match"], bool)
     assert len(data["base_client_size"]) == 2
@@ -76,7 +76,7 @@ def test_info_reports_missing_and_orphans(env):
     assert "scc.png" in data["counts"]["orphans"]
     assert "首页.png" not in data["counts"]["missing"]
     assert "EXPLORE_MAP" not in str(data["counts"]["missing"])  # 该状态模板仍缺失
-    assert len(data["counts"]["missing"]) == 33          # 34 个状态只补了 1 张图
+    assert len(data["counts"]["missing"]) == 36          # 37 个状态只补了 1 张图
 
 
 # --------------------------------------------------------------------------- #
@@ -85,7 +85,7 @@ def test_info_reports_missing_and_orphans(env):
 def test_states_shape(env):
     mod, tpl, client = env
     states = client.get("/api/states").get_json()
-    assert len(states) == 34
+    assert len(states) == 37
 
     by_key = {s["key"]: s for s in states}
     home = by_key["HOME"]
@@ -139,23 +139,24 @@ def test_flows_shape(env):
     flows = client.get("/api/flows").get_json()
     names = {f["name"] for f in flows}
     # 以 flows/registry.py 为准：即使某个流程不引用任何状态，也必须出现在清单里
-    assert names == {"explore", "soul", "awake", "breakthrough", "seal", "heart",
+    assert names == {"explore", "soul", "shard", "awake", "breakthrough", "seal", "heart",
                      "event-aband3t", "event-aj8fer"}
     for f in flows:
         assert set(f) == {"name", "description", "states"}
         assert isinstance(f["states"], list)
         assert f["description"]
+    shard = {f["name"]: f for f in flows}["shard"]
+    assert "SHARD_CHALLENGE" in shard["states"]
 
 
-def test_soul_flow_references_no_states(env):
-    """记录现状：soul 是纯定时流程（click → sleep 80s → click），不做任何状态校验。
+def test_soul_flow_references_states(env):
+    """soul 已改为模板匹配驱动：引用御魂挑战与碎片结算状态。
 
-    所以它会出现在流程下拉里但 states 为空，状态卡片的 used_by 也不会出现 soul。
-    若将来给 SoulFlow 补上状态校验，这条测试会失败并提醒更新预期。
+    旧版 soul 是纯定时流程（states 为空）；改成匹配驱动后本测试记录新预期。
     """
     mod, tpl, client = env
     flows = {f["name"]: f for f in client.get("/api/flows").get_json()}
-    assert flows["soul"]["states"] == []
+    assert {"SOUL_CHALLENGE", "SHARD_BATTLE_END"} <= set(flows["soul"]["states"])
     assert flows["explore"]["states"], "explore 应该引用了状态"
     assert "HOME" in flows["explore"]["states"]
 

@@ -106,9 +106,9 @@ HOME = State(
   业务代码请直接 `from states.home import HOME`，可读性更好。
 
 ### `actions/` — 操作（职责 3，解决"坐标写死"的关键层）
-- `window.py`：`GameWindow` + `Win32WindowFinder`（按标题/类名找窗口，取**客户区**矩形，声明 DPI 感知）+ `FullScreenFinder`（找不到窗口或非 Windows 时把整屏当客户区）。找不到窗口时按 `settings.FALLBACK_TO_FULLSCREEN` 决定回退还是抛 `WindowNotFoundError`。
+- `window.py`：`GameWindow` + `Win32WindowFinder`（按标题/类名找窗口，取**客户区**矩形，声明 DPI 感知）+ `MacWindowFinder`（macOS 按进程名定位窗口，默认「iPhone Mirroring」iOS 镜像窗口，窗口内点击透传到手机）+ `FullScreenFinder`（找不到窗口或其它平台时把整屏当客户区）。找不到窗口时按 `settings.FALLBACK_TO_FULLSCREEN` 决定回退还是抛 `WindowNotFoundError`。
 - `viewport.py`：`Viewport`，纯计算。`to_screen(Point)` 逻辑坐标 → 屏幕坐标（按窗口位置平移 + 按窗口尺寸缩放 + 校准偏移 + 越界裁剪），`to_logical(screen)` 反向。**这一层让换分辨率、窗口不在原点都不再致命。**
-- `mouse.py`：`HumanMouse`，只认屏幕坐标。落点随机抖动、动作间随机停顿（对应旧 `personal_pause`）、拖动分步 + 缓动。
+- `mouse.py`：`HumanMouse`，只认屏幕坐标。落点随机抖动、动作间随机停顿（对应旧 `personal_pause`）、拖动分步 + 缓动。macOS 上 controller 注入目标进程 PID 后启用「礼貌点击」：点击瞬间激活目标窗口并在坐标上会话级点击，随即还原用户光标与焦点，轮询识别期间完全不碰鼠标。
 - `controller.py`：`GameController` 门面，flows 唯一入口。`resolve()` 统一处理三种点击目标：
   - `Point` → 逻辑坐标，按窗口换算；
   - `Match` / `Box` → vision 的识别结果，取中心点（已是屏幕坐标）；
@@ -125,6 +125,7 @@ HOME = State(
 | `breakthrough/` | `breakthrough` | `scripts/fight.py` |
 | `seal/` | `seal` | `scripts/dogger.py` |
 | `heart_dojo/` | `heart` | `scripts/heart.py` |
+| `shard/` | `shard` | —（新增：式神碎片挑战循环，模板匹配驱动，支持 iOS 镜像） |
 | `events/` | `event-aband3t` / `event-aj8fer` | `scripts/abnd3t.py`、`scripts/aj8fer.py` |
 
 - `base.py`：`Flow` 基类（`click` / `drag` / `scroll` / `is_active` / `locate` / `wait` / `expect` / `wait_gone` / `wait_any` / `click_state` / `prepare` / `run` / `execute`）与 `RetryGuard`。
@@ -199,6 +200,7 @@ python main.py --states          # 列出全部状态常量、模板、阈值
 python main.py --check           # 自检：模板是否齐全 + 能否定位游戏窗口 + 缩放比例
 python main.py explore --times 10 --exp-only
 python main.py soul --times 30
+python main.py shard --times 10     # 式神碎片挑战循环（macOS + iOS 镜像可用）
 python main.py awake --dungeon 4 --times 20
 python main.py breakthrough --times 3      # 不传 --times 则无限循环
 python main.py seal --times 50

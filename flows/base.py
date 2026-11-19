@@ -149,9 +149,10 @@ class Flow:
 
     # ------------------------------------------------------------------ 生命周期
     def prepare(self) -> None:
-        """流程开始前的准备：定位窗口、置前。子类可覆盖。"""
+        """流程开始前的准备：定位窗口；无法礼貌点击时才置前窗口。"""
         self.controller.refresh_window()
-        self.controller.focus()
+        if not self.controller.mouse.polite_click_available():
+            self.controller.focus()
 
     def run(self) -> None:
         """流程主体，子类必须实现。"""

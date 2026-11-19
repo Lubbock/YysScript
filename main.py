@@ -7,6 +7,7 @@
     python main.py --states               # 列出全部状态常量
     python main.py explore --times 10     # 自动探索 10 轮
     python main.py soul --times 30        # 自动御魂 30 次
+    python main.py shard --times 10     # 式神碎片挑战循环
     python main.py awake --dungeon 4 --times 20
     python main.py breakthrough --times 3 # 3 轮结界突破（不传则无限循环）
     python main.py seal --times 50
@@ -32,6 +33,7 @@ _TIMES_KWARG = {
     "explore": "times",
     "soul": "times",
     "awake": "times",
+    "shard": "times",
     "breakthrough": "rounds",
     "seal": "times",
     "heart": "times",
