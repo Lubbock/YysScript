@@ -12,9 +12,13 @@ macOS「礼貌点击」模式（controller 注入 pid_provider 后启用）：
 镜像 / 游戏窗口只在自己是活跃 App 时才响应点击，而用户还要继续用电脑，
 所以每次点击只做三件事，把干扰压到点击瞬间：
 1. 记下用户光标位置与当前前台 App；
-2. 短暂激活目标窗口 -> 在坐标上会话级点击（不做光标移动动画）；
+2. 用 System Events 短暂激活目标窗口 -> 在坐标上会话级点击（不做光标移动动画）；
 3. 立刻把光标 warp 回原位，并把焦点还给用户原来的 App。
 轮询识别期间完全不碰鼠标与焦点。
+
+注意：命令行 Python 进程里 `NSRunningApplication.activateWithOptions_` 不会真的
+切换前台（实测前台不变），激活必须走 System Events 的 `frontmost`；并且要等
+前台确实切换后再点击，否则点击会落在旧前台窗口上。
 """
 from __future__ import annotations
 
@@ -185,9 +189,6 @@ class HumanMouse:
 # --------------------------------------------------------------------------- #
 # macOS 礼貌点击：点击瞬间激活目标窗口，点完立刻还原光标与用户焦点
 # --------------------------------------------------------------------------- #
-_ACTIVATE_IGNORING_OTHERS = 1 << 1
-
-
 class _polite_session:
     """点击期间的上下文：激活目标进程，退出时还原光标与前台 App。"""
 
@@ -198,7 +199,6 @@ class _polite_session:
         self.old_xy: Optional[Tuple[float, float]] = None
 
     def __enter__(self):
-        import Quartz
         from AppKit import NSEvent, NSScreen, NSWorkspace
 
         ws = NSWorkspace.sharedWorkspace()
@@ -207,36 +207,58 @@ class _polite_session:
         height = NSScreen.mainScreen().frame().size.height
         self.old_xy = (loc.x, height - loc.y)
         if self.prev_app is None or self.prev_app.processIdentifier() != self.pid:
-            app = _app_for_pid(self.pid)
-            if app is not None:
-                app.activateWithOptions_(_ACTIVATE_IGNORING_OTHERS)
-                self.activated = True
-                time.sleep(0.15)  # 等激活生效，避免点击落在旧前台窗口上
+            _set_frontmost(self.pid)
+            self.activated = _wait_frontmost(self.pid, timeout=1.0)
+            if not self.activated:
+                raise RuntimeError(
+                    "无法激活目标窗口（pid={}），放弃本次点击".format(self.pid))
         return self
 
     def __exit__(self, *exc_info) -> None:
         import Quartz
+        from AppKit import NSWorkspace
 
         if self.old_xy is not None:
             Quartz.CGWarpMouseCursorPosition(self.old_xy)
             Quartz.CGAssociateMouseAndMouseCursorPosition(True)
         if self.activated and self.prev_app is not None:
-            time.sleep(0.2)
             ws = NSWorkspace.sharedWorkspace()
             current = ws.frontmostApplication()
             # 用户在这期间自己切了别的应用就不打扰，只在我们抢来的焦点还在时归还
             if current is not None and current.processIdentifier() == self.pid:
-                self.prev_app.activateWithOptions_(_ACTIVATE_IGNORING_OTHERS)
+                _set_frontmost(self.prev_app.processIdentifier())
         return False
 
 
-def _app_for_pid(pid: int):
+def _set_frontmost(pid: int) -> None:
+    """用 System Events 把指定进程置前。
+
+    命令行 Python 进程里 NSRunningApplication.activateWithOptions_ 不生效
+    （前台不会切换），System Events 的 frontmost 是实测可用的通道。
+    """
+    import subprocess
+
+    script = (
+        'tell application "System Events" to set frontmost of '
+        "(first process whose unix id is {}) to true".format(pid)
+    )
+    try:
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def _wait_frontmost(pid: int, timeout: float = 1.0) -> bool:
+    """轮询等待目标进程成为前台，激活真的生效后才允许点击。"""
     from AppKit import NSWorkspace
 
-    for app in NSWorkspace.sharedWorkspace().runningApplications():
-        if app.processIdentifier() == pid:
-            return app
-    return None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        if app is not None and app.processIdentifier() == pid:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _session_click(point: ScreenPoint) -> None:

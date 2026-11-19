@@ -22,6 +22,7 @@ python main.py awake --dungeon 4 --times 20
 python main.py breakthrough --times 3
 python main.py seal --times 50
 python main.py shard --times 10    # 式神碎片 10 次（macOS + iOS 镜像可用）
+python main.py heart --times 10
 ```
 
 常用开关：`--fullscreen`（整屏当客户区）、`--align-window`（把窗口挪到左上角）、
@@ -73,6 +74,7 @@ python main.py shard --times 10       # 自动式神碎片 10 次
 | 等结算长时间超时 | 结算画面样式变了，用模板管理界面重截 `碎片打完.png` |
 | 点击没反应 | 检查镜像窗口是否最小化 / 按钮位置是否被弹窗盖住 |
 | 改了镜像窗口大小后识别不到 | 匹配自带多尺度候选（`settings.TEMPLATE_SCALES`）；仍不行就重截模板 |
+
 ## 工作原理
 
 1. `vision` 截取游戏窗口画面；
