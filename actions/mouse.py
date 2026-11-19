@@ -16,9 +16,12 @@ macOS「礼貌点击」模式（controller 注入 pid_provider 后启用）：
 3. 立刻把光标 warp 回原位，并把焦点还给用户原来的 App。
 轮询识别期间完全不碰鼠标与焦点。
 
-注意：命令行 Python 进程里 `NSRunningApplication.activateWithOptions_` 不会真的
-切换前台（实测前台不变），激活必须走 System Events 的 `frontmost`；并且要等
-前台确实切换后再点击，否则点击会落在旧前台窗口上。
+两个实测结论（别再踩）：
+- 命令行 Python 进程里 `NSRunningApplication.activateWithOptions_` 与
+  `NSWorkspace.frontmostApplication()` 都不可信（前者不生效、后者返回过期值），
+  前台的查询与设置一律走 System Events（osascript + unix id）；
+- 合成点击（CGEventPost）需要当前进程链有「辅助功能」权限，否则被系统静默丢弃，
+  用 accessibility_trusted() 自检（ctypes 直调，本机 pyobjc 缺 ApplicationServices 子包）。
 """
 from __future__ import annotations
 
@@ -30,6 +33,9 @@ from typing import Callable, Optional, Tuple
 import pyautogui
 
 from config import settings
+from core.logger import get_logger
+
+log = get_logger(__name__)
 
 ScreenPoint = Tuple[int, int]
 
@@ -116,11 +122,16 @@ class HumanMouse:
         target = self._jitter(point)
         pid = self._target_pid()
         if pid is not None:
-            with _polite_session(pid):
+            log.info("礼貌点击: 目标 pid=%s 坐标=%s 点击前前台=%s",
+                     pid, target, _frontmost_pid())
+            with _polite_session(pid) as session:
+                log.info("礼貌点击: 激活后前台=%s activated=%s",
+                         _frontmost_pid(), session.activated)
                 for index in range(max(1, clicks)):
                     _session_click(target)
                     if index + 1 < clicks:
                         time.sleep(interval)
+            log.info("礼貌点击: 归还后前台=%s", _frontmost_pid())
             self.sleep_human()
             return target
         pyautogui.moveTo(target[0], target[1], duration=move_duration,
@@ -187,6 +198,30 @@ class HumanMouse:
 
 
 # --------------------------------------------------------------------------- #
+# 权限自检
+# --------------------------------------------------------------------------- #
+def accessibility_trusted() -> bool:
+    """当前进程链是否拥有 macOS 辅助功能权限。
+
+    没有该权限时 CGEventPost 发出的合成点击会被系统**静默丢弃**（不报错、
+    手机也没反应），是「脚本跑了但不点击」最常见的原因。
+    用 ctypes 直调 ApplicationServices，避免依赖 pyobjc 的对应子包。
+    """
+    if sys.platform != "darwin":
+        return True
+    try:
+        import ctypes
+
+        lib = ctypes.CDLL(
+            "/System/Library/Frameworks/ApplicationServices.framework/"
+            "Versions/A/ApplicationServices")
+        lib.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(lib.AXIsProcessTrusted())
+    except Exception:
+        return True
+
+
+# --------------------------------------------------------------------------- #
 # macOS 礼貌点击：点击瞬间激活目标窗口，点完立刻还原光标与用户焦点
 # --------------------------------------------------------------------------- #
 class _polite_session:
@@ -194,48 +229,66 @@ class _polite_session:
 
     def __init__(self, pid: int) -> None:
         self.pid = pid
-        self.prev_app = None
+        self.prev_pid: Optional[int] = None
         self.activated = False
         self.old_xy: Optional[Tuple[float, float]] = None
+        self._activate_err = ""
 
     def __enter__(self):
-        from AppKit import NSEvent, NSScreen, NSWorkspace
+        from AppKit import NSEvent, NSScreen
 
-        ws = NSWorkspace.sharedWorkspace()
-        self.prev_app = ws.frontmostApplication()
         loc = NSEvent.mouseLocation()
         height = NSScreen.mainScreen().frame().size.height
         self.old_xy = (loc.x, height - loc.y)
-        if self.prev_app is None or self.prev_app.processIdentifier() != self.pid:
-            _set_frontmost(self.pid)
-            self.activated = _wait_frontmost(self.pid, timeout=1.0)
+        # 注意：命令行 Python 进程里 NSWorkspace.frontmostApplication() 返回的是
+        # 过期值（实测系统已切换前台它仍报旧 App），前台判定必须走 System Events。
+        self.prev_pid = _frontmost_pid()
+        if self.prev_pid != self.pid:
+            self._activate_err = _set_frontmost(self.pid)
+            self.activated = _wait_frontmost(self.pid, timeout=1.5)
             if not self.activated:
                 raise RuntimeError(
-                    "无法激活目标窗口（pid={}），放弃本次点击".format(self.pid))
+                    "无法激活目标窗口（pid={}），放弃本次点击。{}"
+                    "若反复出现：系统设置 -> 隐私与安全性 -> 自动化，"
+                    "允许你的终端控制 System Events。".format(
+                        self.pid,
+                        "osascript: {} ".format(self._activate_err) if self._activate_err else "",
+                    )
+                )
         return self
 
     def __exit__(self, *exc_info) -> None:
         import Quartz
-        from AppKit import NSWorkspace
 
         if self.old_xy is not None:
             Quartz.CGWarpMouseCursorPosition(self.old_xy)
             Quartz.CGAssociateMouseAndMouseCursorPosition(True)
-        if self.activated and self.prev_app is not None:
-            ws = NSWorkspace.sharedWorkspace()
-            current = ws.frontmostApplication()
+        if self.activated and self.prev_pid is not None:
             # 用户在这期间自己切了别的应用就不打扰，只在我们抢来的焦点还在时归还
-            if current is not None and current.processIdentifier() == self.pid:
-                _set_frontmost(self.prev_app.processIdentifier())
+            if _frontmost_pid() == self.pid:
+                _set_frontmost(self.prev_pid)
         return False
 
 
-def _set_frontmost(pid: int) -> None:
-    """用 System Events 把指定进程置前。
+def _frontmost_pid() -> Optional[int]:
+    """当前前台进程 PID（走 System Events；NSWorkspace 在命令行进程里不可信）。"""
+    import subprocess
 
-    命令行 Python 进程里 NSRunningApplication.activateWithOptions_ 不生效
-    （前台不会切换），System Events 的 frontmost 是实测可用的通道。
-    """
+    script = (
+        'tell application "System Events" to get unix id of '
+        "first application process whose frontmost is true"
+    )
+    try:
+        out = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        return int(out) if out else None
+    except Exception:
+        return None
+
+
+def _set_frontmost(pid: int) -> str:
+    """用 System Events 把指定进程置前，返回 osascript 的报错（空串表示无报错）。"""
     import subprocess
 
     script = (
@@ -243,21 +296,21 @@ def _set_frontmost(pid: int) -> None:
         "(first process whose unix id is {}) to true".format(pid)
     )
     try:
-        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
-    except Exception:
-        pass
+        proc = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True, timeout=5,
+        )
+        return proc.stderr.strip()
+    except Exception as exc:
+        return str(exc)
 
 
-def _wait_frontmost(pid: int, timeout: float = 1.0) -> bool:
+def _wait_frontmost(pid: int, timeout: float = 1.5) -> bool:
     """轮询等待目标进程成为前台，激活真的生效后才允许点击。"""
-    from AppKit import NSWorkspace
-
     deadline = time.time() + timeout
     while time.time() < deadline:
-        app = NSWorkspace.sharedWorkspace().frontmostApplication()
-        if app is not None and app.processIdentifier() == pid:
+        if _frontmost_pid() == pid:
             return True
-        time.sleep(0.05)
+        time.sleep(0.12)
     return False
 
 

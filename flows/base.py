@@ -151,7 +151,15 @@ class Flow:
     def prepare(self) -> None:
         """流程开始前的准备：定位窗口；无法礼貌点击时才置前窗口。"""
         self.controller.refresh_window()
-        if not self.controller.mouse.polite_click_available():
+        if self.controller.mouse.polite_click_available():
+            from actions.mouse import accessibility_trusted
+
+            if not accessibility_trusted():
+                self.log.error(
+                    "当前终端没有 macOS 辅助功能权限，点击事件会被系统静默丢弃！"
+                    "请到 系统设置 -> 隐私与安全性 -> 辅助功能，勾选你正在用的终端后重跑。"
+                )
+        else:
             self.controller.focus()
 
     def run(self) -> None:

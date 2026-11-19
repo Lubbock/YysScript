@@ -126,6 +126,15 @@ def run_check() -> int:
                  rect.height / settings.BASE_CLIENT_SIZE[1])
         print("坐标缩放比例: x={:.3f} y={:.3f}".format(*scale))
 
+    from actions.mouse import accessibility_trusted
+
+    if not accessibility_trusted():
+        problems.append("macOS 辅助功能权限未授予")
+        print("辅助功能权限: 未授予 —— 合成点击会被系统静默丢弃，"
+              "请到 系统设置 -> 隐私与安全性 -> 辅助功能 勾选你的终端")
+    else:
+        print("辅助功能权限: 已授予（合成点击可送达）")
+
     return 1 if problems else 0
 
 
