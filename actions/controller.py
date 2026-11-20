@@ -129,14 +129,19 @@ class GameController:
         button: str = "left",
         duration: float = 0.0,
         interval: float = 0.1,
-    ) -> ScreenPoint:
-        """点击目标（自动处理逻辑坐标 / 识别结果 / 屏幕坐标）。"""
+    ) -> Optional[ScreenPoint]:
+        """点击目标（自动处理逻辑坐标 / 识别结果 / 屏幕坐标）。
+
+        返回实际点击的屏幕坐标；**窗口激活失败导致点击被跳过时返回 None**，
+        调用方应据此判断动作是否真的送达。
+        """
         screen = self.resolve(target)
         log.debug("click %s -> 屏幕 %s", target, screen)
         return self.mouse.click(screen, clicks=clicks, button=button,
                                 duration=duration, interval=interval)
 
-    def double_click(self, target: ClickTarget, duration: float = 0.0) -> ScreenPoint:
+    def double_click(self, target: ClickTarget,
+                     duration: float = 0.0) -> Optional[ScreenPoint]:
         return self.click(target, clicks=2, duration=duration)
 
     def drag(

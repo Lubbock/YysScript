@@ -29,6 +29,18 @@ macOS「礼貌点击」模式（controller 注入 pid_provider 后启用）：
   前台的查询与设置一律走 System Events（osascript + unix id）；
 - 合成点击（CGEventPost）需要当前进程链有「辅助功能」权限，否则被系统静默丢弃，
   用 accessibility_trusted() 自检（ctypes 直调，本机 pyobjc 缺 ApplicationServices 子包）。
+
+激活失败的处理（挂机健壮性）：
+置前目标窗口这一步很容易偶发失败 —— 用户正好在切窗口、系统刚从休眠唤醒、
+锁屏解锁瞬间、osascript 超时或 System Events 忙。这些都是瞬时的，所以
+`_activate_frontmost()` 会按 `settings.ACTIVATE_MAX_ATTEMPTS` 自动重试。
+重试仍然失败时**不抛异常终止进程**（旧行为是抛裸 RuntimeError，一路穿到 main.py
+变成未捕获 traceback，整晚挂机白跑），而是：
+1. 跳过这一次操作，click() 返回 None（drag / scroll 静默返回），
+   上层（flows/engine.py + flows/battle_cycle.py）据此重置状态、下一拍自动重试；
+2. 连续失败达到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才抛 `WindowActivationError`
+   —— 它是 YysError 子类，main.py 会打印一句话并以退出码 1 结束，不是 traceback。
+   这个上限是为了避免「自动化权限被收回后脚本空跑一整晚什么都没做」。
 """
 from __future__ import annotations
 
@@ -41,6 +53,7 @@ from typing import Callable, Optional, Tuple
 import pyautogui
 
 from config import settings
+from core.errors import WindowActivationError
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -78,6 +91,11 @@ class HumanMouse:
         self._rng = rng or random.Random()
         #: 返回目标进程 PID（macOS 礼貌点击用）；None 表示走 pyautogui 全局点击
         self.pid_provider: Optional[Callable[[], Optional[int]]] = None
+        #: 礼貌点击累计 / 连续「窗口激活失败」次数。
+        #: 单次失败只是跳过本次操作（下一轮流程会重试），连续失败到上限才中止，
+        #: 避免权限被收回后脚本空跑一整晚。
+        self.activation_failures = 0
+        self._consecutive_activation_failures = 0
 
     # ------------------------------------------------------------------ 基础
     def sleep_human(self) -> None:
@@ -114,6 +132,28 @@ class HumanMouse:
         """当前是否走礼貌点击（不长时间占用光标 / 焦点）。"""
         return self._target_pid() is not None
 
+    def _note_activation_ok(self) -> None:
+        """激活成功：连续失败计数归零。"""
+        self._consecutive_activation_failures = 0
+
+    def _on_activation_failure(self, exc: WindowActivationError, action: str) -> None:
+        """激活失败（已重试过）：跳过本次操作，让流程下一轮自己重试。
+
+        **不向上抛**：一次瞬时失败（用户在切窗口、屏幕刚唤醒）不该结束整个进程，
+        跳过这一次点击，状态机下一拍会发现界面没变、从而重新尝试，挂机因此能自愈。
+        只有连续失败达到 ACTIVATE_MAX_CONSECUTIVE_FAILURES 才抛 WindowActivationError
+        （它是 YysError，main.py 会打印一句话并以退出码 1 结束，不是 traceback）。
+        """
+        self.activation_failures += 1
+        self._consecutive_activation_failures += 1
+        limit = settings.ACTIVATE_MAX_CONSECUTIVE_FAILURES
+        log.error("%s被跳过（连续第 %s 次窗口激活失败，累计 %s 次）：%s",
+                  action, self._consecutive_activation_failures,
+                  self.activation_failures, exc)
+        if limit > 0 and self._consecutive_activation_failures >= limit:
+            raise WindowActivationError(
+                "连续 {} 次无法激活目标窗口，中止流程。{}".format(limit, exc))
+
     # ------------------------------------------------------------------ 动作
     def move_to(self, point: ScreenPoint, duration: float = 0.3) -> None:
         x, y = self._jitter(point)
@@ -127,11 +167,14 @@ class HumanMouse:
         interval: float = 0.1,
         duration: float = 0.0,
         move_duration: float = 0.3,
-    ) -> ScreenPoint:
+    ) -> Optional[ScreenPoint]:
         """移动到目标并点击，返回实际点击的屏幕坐标。
 
         礼貌点击模式下不播放光标移动动画：激活目标窗口、把光标 warp 到目标点
         （并补发 mouseMoved）后直接点击，随即还原用户光标与焦点。
+
+        窗口激活失败（内部已自动重试过）时**返回 None 表示这次点击没送达**，
+        不抛异常 —— 调用方据此跳过本次动作、下一轮重试，挂机不会被打断。
         """
         target = self._jitter(point)
         pid = self._target_pid()
@@ -141,14 +184,19 @@ class HumanMouse:
             log.info("礼貌点击: 目标 pid=%s 坐标=%s", pid, target)
             if trace:
                 log.debug("礼貌点击: 点击前前台=%s", _frontmost_pid())
-            with _polite_session(pid) as session:
-                if trace:
-                    log.debug("礼貌点击: 激活后前台=%s activated=%s",
-                              _frontmost_pid(), session.activated)
-                for index in range(max(1, clicks)):
-                    _session_click(target)
-                    if index + 1 < clicks:
-                        time.sleep(interval)
+            try:
+                with _polite_session(pid) as session:
+                    self._note_activation_ok()
+                    if trace:
+                        log.debug("礼貌点击: 激活后前台=%s activated=%s",
+                                  _frontmost_pid(), session.activated)
+                    for index in range(max(1, clicks)):
+                        _session_click(target)
+                        if index + 1 < clicks:
+                            time.sleep(interval)
+            except WindowActivationError as exc:
+                self._on_activation_failure(exc, "点击 {}".format(target))
+                return None
             if trace:
                 log.debug("礼貌点击: 归还后前台=%s", _frontmost_pid())
             self.sleep_human()
@@ -182,8 +230,14 @@ class HumanMouse:
         ex, ey = self._jitter(end)
         pid = self._target_pid()
         if pid is not None:
-            with _polite_session(pid):
-                _session_drag((sx, sy), (ex, ey), steps, duration)
+            try:
+                with _polite_session(pid):
+                    self._note_activation_ok()
+                    _session_drag((sx, sy), (ex, ey), steps, duration)
+            except WindowActivationError as exc:
+                self._on_activation_failure(
+                    exc, "拖动 {} -> {}".format((sx, sy), (ex, ey)))
+                return
             self.sleep_human()
             return
         pyautogui.moveTo(sx, sy, duration=0.3, tween=_tween("easeOutQuad"))
@@ -206,8 +260,13 @@ class HumanMouse:
         target_point = None if point is None else self._jitter(point)
         pid = self._target_pid()
         if pid is not None:
-            with _polite_session(pid):
-                _session_scroll(clicks, target_point)
+            try:
+                with _polite_session(pid):
+                    self._note_activation_ok()
+                    _session_scroll(clicks, target_point)
+            except WindowActivationError as exc:
+                self._on_activation_failure(exc, "滚动 {} 格".format(clicks))
+                return
             time.sleep(pause)
             return
         if point is not None:
@@ -255,28 +314,27 @@ class _polite_session:
         self._activate_err = ""
 
     def __enter__(self):
-        from AppKit import NSEvent, NSScreen
-
-        loc = NSEvent.mouseLocation()
-        height = NSScreen.mainScreen().frame().size.height
-        self.old_xy = (loc.x, height - loc.y)
+        # 记录用户光标位置只是为了点完还原；取不到也能继续点，不该因此判失败
+        self.old_xy = _capture_cursor_position()
         # 注意：命令行 Python 进程里 NSWorkspace.frontmostApplication() 返回的是
         # 过期值（实测系统已切换前台它仍报旧 App），前台判定必须走 System Events。
         self.prev_pid = _frontmost_pid()
+        # 显示器休眠时点击根本送不到目标窗口、激活也基本必失败，
+        # 先给一次明确提示（只在状态跳变时记日志），免得只看到一串激活报错
+        _warn_if_display_asleep()
         if self.prev_pid != self.pid:
-            self._activate_err = _set_frontmost(self.pid)
-            self.activated = _wait_frontmost(self.pid, timeout=1.5)
+            self.activated, self._activate_err = _activate_frontmost(self.pid)
             if not self.activated:
-                raise RuntimeError(
-                    "无法激活目标窗口（pid={}），放弃本次点击。{}"
+                raise WindowActivationError(
+                    "无法激活目标窗口（pid={}），已重试 {} 次。{}"
                     "若反复出现：系统设置 -> 隐私与安全性 -> 自动化，"
-                    "允许你的终端控制 System Events。".format(
+                    "允许你的终端控制 System Events；"
+                    "或确认镜像窗口没有最小化、显示器没有休眠。".format(
                         self.pid,
+                        settings.ACTIVATE_MAX_ATTEMPTS,
                         "osascript: {} ".format(self._activate_err) if self._activate_err else "",
                     )
                 )
-        # 显示器休眠时点击根本送不到目标窗口，先给一次明确提示（只在状态跳变时记日志）
-        _warn_if_display_asleep()
         return self
 
     def __exit__(self, *exc_info) -> None:
@@ -333,6 +391,57 @@ def _wait_frontmost(pid: int, timeout: float = 1.5) -> bool:
             return True
         time.sleep(0.12)
     return False
+
+
+def _activate_frontmost(
+    pid: int,
+    attempts: Optional[int] = None,
+    timeout: Optional[float] = None,
+    pause: Optional[float] = None,
+) -> Tuple[bool, str]:
+    """把目标进程置前并确认生效，**失败自动重试**。
+
+    返回 (是否成功, 最后一次 osascript 报错)。
+
+    为什么必须重试：单次激活失败在挂机场景里很常见 —— 用户正好在切窗口、
+    系统刚从休眠唤醒、锁屏解锁瞬间、osascript 偶发超时或 System Events 忙。
+    这些都是瞬时的，隔半秒再试一次通常就好了。以前这里失败就直接抛异常，
+    一路穿到 main.py 变成未捕获 traceback，整晚的挂机白跑。
+    """
+    attempts = (settings.ACTIVATE_MAX_ATTEMPTS if attempts is None
+                else max(1, int(attempts)))
+    timeout = settings.ACTIVATE_WAIT_TIMEOUT if timeout is None else timeout
+    pause = settings.ACTIVATE_RETRY_PAUSE if pause is None else pause
+
+    err = ""
+    for attempt in range(1, attempts + 1):
+        err = _set_frontmost(pid)
+        if _wait_frontmost(pid, timeout=timeout):
+            if attempt > 1:
+                log.info("第 %s/%s 次尝试后成功激活目标窗口 pid=%s", attempt, attempts, pid)
+            return True, ""
+        log.warning("激活目标窗口失败（pid=%s，第 %s/%s 次）%s", pid, attempt, attempts,
+                    "osascript: {}".format(err) if err else "")
+        if attempt < attempts and pause > 0:
+            time.sleep(pause)
+    return False, err
+
+
+def _capture_cursor_position() -> Optional[Tuple[float, float]]:
+    """记下用户当前光标位置（屏幕绝对坐标），点完好还原。
+
+    取不到就返回 None —— 还原光标只是礼貌，不是点击成功的前提，
+    不该因为 AppKit 异常就让整次点击失败。
+    """
+    try:
+        from AppKit import NSEvent, NSScreen
+
+        loc = NSEvent.mouseLocation()
+        height = NSScreen.mainScreen().frame().size.height
+        return (loc.x, height - loc.y)
+    except Exception as exc:
+        log.debug("读取当前光标位置失败，本次点击后不还原光标: %s", exc)
+        return None
 
 
 # --------------------------------------------------------------------------- #

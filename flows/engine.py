@@ -31,7 +31,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from config import settings
 from core.bus import EventBus, Subscription
-from core.errors import FlowAbortedError
+from core.errors import FlowAbortedError, WindowActivationError
 from core.logger import get_logger
 from core.timing import CycleTimer, FixedScheduler, WaitPlan
 from flows.signals import (
@@ -371,10 +371,18 @@ class FlowEngine:
 
     # ------------------------------------------------------------------ 动作
     def click(self, target: Any, detail: str = "", state_key: str = "", **kwargs) -> Any:
-        """点击并广播 action.performed。
+        """点击并广播 action.performed。返回点击坐标；**未送达时返回 None**。
 
         target 支持 controller 能接受的一切（Point / Match / Box / 屏幕坐标），
         另外还支持直接传 Detection（自动取它的 match）。
+
+        两种「点击没发生」的情况，都不抛异常打断挂机：
+        1. 窗口激活失败（actions/mouse.py 内部已自动重试过）→ controller 返回 None，
+           这里记 warning 并且**不广播 action.performed**（事件只描述真的发生过的动作），
+           订阅方据此决定是跳过还是稍后重试；
+        2. 连续激活失败达到上限 → mouse 抛 WindowActivationError，这里转成 fail()，
+           由引擎在本次事件投递结束后抛出，main.py 因此仍是「一句话 + 退出码 1」，
+           而不是未捕获 traceback。
         """
         if isinstance(target, Detection):
             state_key = state_key or target.state.key
@@ -383,7 +391,16 @@ class FlowEngine:
             raise FlowAbortedError("click 目标为空（{}）".format(detail or "未说明"))
         result = None
         if self.controller is not None:
-            result = self.controller.click(target, **kwargs)
+            try:
+                result = self.controller.click(target, **kwargs)
+            except WindowActivationError as exc:
+                # 订阅方里直接抛会被总线的异常隔离吞掉，所以交给 fail()
+                self.fail(exc)
+                return None
+        if result is None:
+            self.log.warning("点击未送达（窗口激活失败），本次动作跳过：%s",
+                             detail or state_key or target)
+            return None
         self.publish(TOPIC_ACTION_PERFORMED, ActionEvent(
             kind="click", target=target, state_key=state_key,
             round_index=self.round_index, detail=detail))

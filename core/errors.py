@@ -33,3 +33,11 @@ class StaminaExhaustedError(YysError):
 
 class FlowAbortedError(YysError):
     """流程主动中止（达到重试上限等）。"""
+
+
+class WindowActivationError(YysError):
+    """无法把目标窗口激活到前台（macOS 礼貌点击的前置条件）。
+
+    是 YysError 的子类，所以 main.py 会把它转成退出码 1 并打印一句话，
+    而不是抛出未捕获的 traceback 直接崩掉进程。
+    """

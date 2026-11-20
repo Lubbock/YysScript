@@ -161,9 +161,12 @@ class BattleCycle:
             return
         if event.match is None:
             return
+        # 点击可能因窗口激活失败而被跳过（engine.click 返回 None）：
+        # 这时绝不能推进阶段，否则会去傻等一场根本没开打的战斗（白等 BATTLE_TIMEOUT）
+        if not self._click_or_retry(event.match, event.key, "点击挑战，进入战斗"):
+            return
         self._phase = PHASE_BATTLE
         self._challenge_seen = True
-        self.engine.click(event.match, state_key=event.key, detail="点击挑战，进入战斗")
         self.log.info("已点击挑战，进入战斗")
         self._battle_cycle = self.engine.timer.begin(self.battle_key)
         self.engine.begin_wait(self.battle_key, self.battle_interval)
@@ -190,7 +193,12 @@ class BattleCycle:
         else:
             self.log.info("检测到残留结算画面 %s，先点击退出", event.state)
         settle_match = event.match
-        self.engine.click(settle_match, state_key=event.key, detail="点击结算")
+        if not self._click_or_retry(settle_match, event.key, "点击结算"):
+            if in_battle:
+                # 点击没送达：退回战斗阶段，下一拍重新识别到结算时会再走一遍这里，
+                # 既不会漏掉这场结算，也不会把这一轮永久卡在 settle 阶段
+                self._phase = PHASE_BATTLE
+            return
         if self.settle_pause > 0:
             self.engine.sleep(self.settle_pause)
 
@@ -232,6 +240,20 @@ class BattleCycle:
         self._phase = PHASE_CHALLENGE
 
     # ------------------------------------------------------------------ 内部
+    def _click_or_retry(self, match: Any, state_key: str, detail: str) -> bool:
+        """点击目标；返回是否真的送达。
+
+        窗口激活失败时 engine.click 返回 None（actions/mouse.py 内部已经重试过了）。
+        这时**重置引擎的当前状态**：否则主循环认为画面还停在这个界面上，
+        同一状态不会再次触发 state.entered，本次动作就永远没人重试了。
+        重置后下一拍识图会重新广播 entered，动作自动重来 —— 挂机因此能自愈。
+        """
+        if self.engine.click(match, state_key=state_key, detail=detail) is not None:
+            return True
+        self.log.warning("%s未送达（窗口未能激活），下一拍自动重试", detail)
+        self.engine.reset_current()
+        return False
+
     def _back_to_challenge(self, settle_match: Any) -> bool:
         """点完结算后等挑战界面回来；御魂的掉落界面需要补点几次（旧行为保留）。
 

@@ -615,3 +615,93 @@ def test_elapsed_round_works_when_clock_starts_at_zero(clock, store):
 
     assert seen[0] == (0.0, 0.0)                 # 第一轮从 t=0 开始
     assert max(elapsed for _, elapsed in seen) >= 30.0
+
+
+# --------------------------------------------------------------------------- #
+# 窗口激活失败：点击未送达时要重试，而不是崩掉或空等
+# --------------------------------------------------------------------------- #
+class FlakyGame(FakeGame):
+    """前 fail_times 次点击「没送达」（模拟窗口激活失败被 actions/mouse.py 跳过）。"""
+
+    def __init__(self, clock, fail_times=1, **kwargs):
+        super().__init__(clock, **kwargs)
+        self.fail_times = fail_times
+        self.attempts = 0
+
+    def click(self, target, **kwargs):
+        self.attempts += 1
+        if self.attempts <= self.fail_times:
+            return None                       # 未送达
+        return FakeGame.click(self, target, **kwargs)
+
+
+def test_undelivered_click_does_not_publish_action_event(clock, store):
+    """action.performed 只描述真的发生过的动作，没送达就不能广播。"""
+    game = FlakyGame(clock, fail_times=99)
+    engine = make_engine(clock, store, game)
+    engine.watch(CHALLENGE)
+    detection = engine.observe()
+
+    assert engine.click(detection, detail="点它") is None
+    assert [topic for topic in topics_of(engine) if topic == TOPIC_ACTION_PERFORMED] == []
+
+
+def test_battle_cycle_retries_undelivered_challenge_click(clock, store):
+    """点挑战没送达时不能推进到战斗阶段，否则会白等一场没开打的战斗。"""
+    game = FlakyGame(clock, fail_times=1, battle_seconds=20.0)
+    engine = make_engine(clock, store, game)
+    make_cycle(engine)
+
+    assert engine.run_rounds(1, round_timeout=450.0) == 1
+    # 第一次没送达 -> reset_current -> 下一拍重新 entered -> 再点，这次成功
+    assert game.clicks == [CHALLENGE.template, BATTLE_END.template]
+    # attempts 含那次未送达的调用：1 次失败 + 挑战 + 结算；clicks 只记真的点下去的
+    assert game.attempts == 3
+    # 没有傻等 BATTLE_TIMEOUT：整轮耗时应接近战斗本身
+    assert store.samples("soul:round")[0] < 60.0
+
+
+def test_battle_cycle_retries_undelivered_settlement_click(clock, store):
+    """点结算没送达时不能把这一轮丢掉，下一拍要重新处理结算。"""
+    class LateSettleGame(FakeGame):
+        """第一次点击（挑战）成功，第二次（结算）没送达，之后都成功。"""
+
+        def __init__(self, clock, **kwargs):
+            super().__init__(clock, **kwargs)
+            self.attempts = 0
+
+        def click(self, target, **kwargs):
+            self.attempts += 1
+            if self.attempts == 2:
+                return None
+            return FakeGame.click(self, target, **kwargs)
+
+    game = LateSettleGame(clock, battle_seconds=10.0)
+    engine = make_engine(clock, store, game)
+    make_cycle(engine)
+
+    assert engine.run_rounds(1, round_timeout=450.0) == 1
+    assert game.clicks == [CHALLENGE.template, BATTLE_END.template]
+    assert store.samples("soul:battle"), "这一轮必须正常收尾并记账"
+
+
+def test_persistent_activation_error_aborts_flow_cleanly(clock, store):
+    """连续激活失败到上限时抛 WindowActivationError（YysError），不是裸 traceback。"""
+    from core.errors import WindowActivationError, YysError
+
+    class DeadGame(FakeGame):
+        def click(self, target, **kwargs):
+            raise WindowActivationError("连续 10 次无法激活目标窗口，中止流程。")
+
+    game = DeadGame(clock, battle_seconds=5.0)
+    engine = make_engine(clock, store, game)
+    make_cycle(engine)
+
+    with pytest.raises(WindowActivationError) as exc_info:
+        engine.run_rounds(3, round_timeout=450.0)
+    assert isinstance(exc_info.value, YysError)
+
+    finished = [event for _, topic, event in engine.bus.history
+                if topic == TOPIC_FLOW_FINISHED][-1]
+    assert finished.aborted is True
+    assert "无法激活" in finished.reason

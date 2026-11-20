@@ -69,7 +69,7 @@ main.py
 
 ### `core/` — 通用能力
 - `logger.py`：`get_logger(name)`，全局只配置一次 handler（修掉旧代码重复 addHandler 导致的日志重复）。日志落 `var/logs/yys_script.log`，按 5MB 轮转。
-- `errors.py`：`YysError` 及子类 `ConfigError` / `WindowNotFoundError` / `StateTimeoutError` / `StaminaExhaustedError` / `FlowAbortedError`。**不要再用 `exit(300)`**，抛异常，由 `main.py` 转退出码。
+- `errors.py`：`YysError` 及子类 `ConfigError` / `WindowNotFoundError` / `StateTimeoutError` / `StaminaExhaustedError` / `FlowAbortedError` / `WindowActivationError`。**不要再用 `exit(300)`**，抛异常，由 `main.py` 转退出码；也**不要抛裸 `RuntimeError`**，那会绕过 `main.py` 的异常处理变成 traceback。
 - `stopwatch.py`：`Stopwatch` 计时、`WaitPredictor` 用历史均值预测等待时长。
 - `bus.py`：`EventBus` —— 进程内**同步**发布/订阅。topic 点分层级，订阅支持 `*`（一段）/ `**`（多段）通配符；
   priority、once、异常隔离（默认吞掉订阅方异常只记日志，`strict=True` 时抛出）、递归深度保护、history 环形缓冲。
@@ -118,6 +118,7 @@ HOME = State(
 - `window.py`：`GameWindow` + `Win32WindowFinder`（按标题/类名找窗口，取**客户区**矩形，声明 DPI 感知）+ `MacWindowFinder`（macOS 按进程名定位窗口，默认「iPhone Mirroring」iOS 镜像窗口，窗口内点击透传到手机）+ `FullScreenFinder`（找不到窗口或其它平台时把整屏当客户区）。找不到窗口时按 `settings.FALLBACK_TO_FULLSCREEN` 决定回退还是抛 `WindowNotFoundError`。
 - `viewport.py`：`Viewport`，纯计算。`to_screen(Point)` 逻辑坐标 → 屏幕坐标（按窗口位置平移 + 按窗口尺寸缩放 + 校准偏移 + 越界裁剪），`to_logical(screen)` 反向。**这一层让换分辨率、窗口不在原点都不再致命。**
 - `mouse.py`：`HumanMouse`，只认屏幕坐标。落点随机抖动、动作间随机停顿（对应旧 `personal_pause`）、拖动分步 + 缓动。macOS 上 controller 注入目标进程 PID 后启用「礼貌点击」：点击瞬间激活目标窗口 -> 把光标 warp 到目标点**并补发一个 mouseMoved** -> 在同一坐标发 down/up -> 还原光标（同样补发 mouseMoved）与焦点，轮询识别期间完全不碰鼠标。坑：`CGWarpMouseCursorPosition` 只改窗口服务的指针坐标、不产生移动事件，App 侧缓存的光标位置（hover / Mac Catalyst 的指针→触摸桥接）不更新，只按坐标发事件会被静默丢掉，表现为「跑一段时间后点不动，手动晃一下鼠标才恢复」，所以 warp 必须配套补发 `kCGEventMouseMoved`；滚动事件本身不带坐标，也要先落点。
+  **激活失败不再终止进程**：`_activate_frontmost()` 按 `ACTIVATE_MAX_ATTEMPTS` 自动重试（用户切窗口 / 刚唤醒 / osascript 超时都是瞬时的）；仍失败就跳过本次操作，`click()` 返回 `None`（`drag` / `scroll` 静默返回），由上层重置状态、下一拍重试；只有连续失败到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才抛 `WindowActivationError`（YysError -> 退出码 1 + 一句话，不是 traceback）。旧行为是抛裸 `RuntimeError`，未被 `main.py` 捕获，整晚挂机白跑。
 - `controller.py`：`GameController` 门面，flows 唯一入口。`resolve()` 统一处理三种点击目标：
   - `Point` → 逻辑坐标，按窗口换算；
   - `Match` / `Box` → vision 的识别结果，取中心点（已是屏幕坐标）；
@@ -258,6 +259,7 @@ HOME = State(
 | 点击太快 / 太规律 | `settings.py` 的 `HUMAN_JITTER` / `HUMAN_PAUSE_RANGE` / `HUMAN_DRAG_STEPS` |
 | 日志、数据库位置 | 环境变量 `YYS_LOG_DIR` / `YYS_DB_PATH`，或 `settings.py` |
 | 等待时间太长/太短 | 各 Flow 的 `*_TIMEOUT` / `BATTLE_DURATION` 类常量 |
+| 窗口激活失败（点击没反应但没报错） | `settings.py` 的 `ACTIVATE_*`：重试次数 / 间隔 / 连续失败上限；日志里搜「激活目标窗口失败」 |
 | 想给某个流程加一条规则（遇到 X 就点 Y） | 新写一个订阅方 `engine.on("state.entered.X", handler)`，不用改 Flow 本体 |
 | 截图太频繁 / 空等太久 | `core/timing.py` 的估计逻辑与 `settings.py` 的 `TIMING_*`（先跑几轮攒样本，之后自动盲等） |
 | 想临时关掉自适应等待 | `--no-adaptive-wait` 或环境变量 `YYS_ADAPTIVE_WAIT=0` |
@@ -310,6 +312,7 @@ python -m pytest tests -q
 - `test_asset_manager_api.py`：模板管理工具的 API 契约（前端 app.js 读的每个字段）、替换/备份/回滚、裁剪、路径穿越拦截、无 pyautogui/cv2 时的降级。
 - `test_bus.py`：事件总线的投递顺序 / priority、`*` 与 `**` 通配符、`state.entered.<KEY>` 精确订阅、退订、once、异常隔离、递归深度保护、history。
 - `test_timing.py`：warm-up 退化、收敛后的盲等计算、异常值剔除、**连续超限回退并重新收敛**、盲等硬上限、discard 不入库、样本跨进程复用、窗口裁剪、识图成本滑窗。
+- `test_mouse_activation.py`：窗口激活失败时**自动重试**、重试耗尽后跳过操作而不是崩进程、连续失败到上限抛 `WindowActivationError`（YysError）、成功清零连续计数、非礼貌点击路径不受影响。
 - `test_engine.py`：用「假游戏」同时充当 matcher 与 controller，跑通 挑战→战斗→结算→回挑战 的完整事件序列、计时入库、收敛后识图次数下降、残留结算清理、两种超时语义、stop / fail / Ctrl-C。
 - `test_state_machine_scheduler.py`：wait_* 的 `scheduler` 参数生效；**不传时 sleep 序列与改造前逐字一致**。
 
@@ -328,5 +331,6 @@ python -m pytest tests -q
 4. **无端到端测试**：涉及真实截图与点击的路径只能人工验证。
 5. `tools/` 下的归档工具未做质量修复（部分依赖 TensorFlow 1.x、PyAudio、pywin32）。
 6. **macOS 长时间挂机限制**：显示器休眠或手机锁屏时，合成点击根本送不到目标窗口。脚本会在检测到「主显示器休眠」时告警一次（`_warn_if_display_asleep`），但修不了它 —— 挂机跑之前要么关掉系统自动休眠，要么 `caffeinate -di python main.py ...`。
+   窗口**激活**失败（切窗口、刚唤醒、osascript 超时）已经能自愈：自动重试 -> 跳过本次点击 -> 下一拍重来；连续失败到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才以退出码 1 干净退出。
 7. **只有 `soul` / `shard` 迁移到事件驱动**：其余 7 个流程仍是命令式 `wait -> click` 写法。
    引擎与订阅方是通用的（`flows/engine.py` + `flows/battle_cycle.py`），迁移其余流程属于后续工作。

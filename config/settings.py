@@ -68,6 +68,18 @@ MAC_WINDOW_PROCESS: str = os.environ.get("YYS_MAC_WINDOW_PROCESS", "iPhone Mirro
 #: 用于修正客户端边框、DPI 缩放等造成的整体偏差。
 CALIBRATION_OFFSET: Tuple[int, int] = (0, 0)
 
+#: 激活目标窗口的最大尝试次数（含首次）。macOS 礼貌点击必须先把镜像 / 游戏窗口
+#: 置前，而单次激活失败很常见 —— 用户正好在切窗口、系统刚从休眠唤醒、
+#: osascript 偶发超时。以前失败就直接抛异常终止进程，现在自动重试。
+ACTIVATE_MAX_ATTEMPTS: int = 3
+#: 每次激活后等待「真的成为前台」的超时（秒）
+ACTIVATE_WAIT_TIMEOUT: float = 1.5
+#: 两次激活尝试之间的间隔（秒）
+ACTIVATE_RETRY_PAUSE: float = 0.5
+#: 连续多少次操作都因激活失败被跳过，就中止流程（0 = 永不中止，一直跳过重试）。
+#: 设这个上限是为了避免「自动化权限被收回后，脚本空跑一整晚什么都没做」。
+ACTIVATE_MAX_CONSECUTIVE_FAILURES: int = 10
+
 
 # --------------------------------------------------------------------------- #
 # 图像识别
