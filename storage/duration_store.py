@@ -73,6 +73,25 @@ class DurationStore:
         with self._db.connect() as conn:
             return self._count(conn, key)
 
+    def keys(self, prefix: str = "") -> List[str]:
+        """有样本的全部 key（可按前缀过滤），按字典序返回。
+
+        给 core/timing.py 的 summary() 用：新进程里内存窗口还是空的，
+        只遍历内存会误报「暂无计时样本」，必须从库里把 key 捞出来。
+        """
+        sql = "SELECT DISTINCT KEY_NAME FROM {}".format(_TABLE)
+        params: tuple = ()
+        if prefix:
+            sql += " WHERE KEY_NAME LIKE ?"
+            # 转义 LIKE 通配符，避免 key 里的 % / _ 被当成模式
+            escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params = (escaped + "%",)
+            sql += " ESCAPE '\\'"
+        sql += " ORDER BY KEY_NAME"
+        with self._db.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [str(row[0]) for row in rows]
+
     def clear(self, key: str) -> int:
         """删除 key 的全部样本。"""
         with self._db.connect() as conn:

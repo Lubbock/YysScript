@@ -449,11 +449,25 @@ class CycleTimer:
 
     # ------------------------------------------------------------------ 汇总
     def summary(self, prefix: str = "") -> List[Tuple[str, Estimate]]:
-        """按 key 排序返回估计值，给流程收尾打总账用。"""
-        keys = set(self._samples) | set(self._probes)
+        """按 key 排序返回估计值，给流程收尾打总账用。
+
+        key 取自「本进程已加载的窗口」∪「数据库里有样本的 key」。
+        只看内存的话，新起一个进程查看历史会误报「暂无计时样本」，
+        让人以为数据丢了（实际库里明明有）。
+        """
+        keys = set(self._samples)
         if prefix:
             keys = {key for key in keys if key.startswith(prefix)}
-        result = [(key, self.estimate(key)) for key in sorted(keys) if key in self._samples]
+        try:
+            keys |= set(self._store.keys(prefix))
+        except Exception as exc:
+            # 自定义 store 没有 keys()、或库不可用：至少把本进程的样本汇总出来
+            log.debug("读取计时 key 清单失败，只汇总本进程样本: %s", exc)
+        result = []
+        for key in sorted(keys):
+            estimate = self.estimate(key)
+            if estimate.samples:          # probe 之类的纯内存 key 没有样本，不列
+                result.append((key, estimate))
         return result
 
     def describe_summary(self, prefix: str = "") -> str:

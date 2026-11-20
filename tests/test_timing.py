@@ -508,3 +508,39 @@ def test_wait_plan_defaults():
     assert plan.blind_wait == 0.0
     assert plan.interval == settings.DEFAULT_WAIT_INTERVAL
     assert "默认" in plan.describe()
+
+
+def test_summary_sees_persisted_samples_in_a_fresh_process(store, clock):
+    """新进程里查看历史：summary 必须能看到库里的样本。
+
+    实测踩到的坑：summary() 只遍历本进程已加载的内存窗口，于是新起一个进程
+    打印总账会显示「（暂无计时样本）」，但同一个 timer 的 plan() 却明明读到了
+    历史样本 —— 看起来像数据丢了，实际只是汇总没去查库。
+    """
+    first = CycleTimer(store=store, clock=clock)
+    record(first, clock, 45.0, "soul:battle")
+    record(first, clock, 60.0, "soul:round")
+
+    fresh = CycleTimer(store=store, clock=clock)      # 全新进程的状态
+    text = fresh.describe_summary("soul:")
+    assert "暂无计时样本" not in text
+    assert [key for key, _ in fresh.summary("soul:")] == ["soul:battle", "soul:round"]
+    assert "min=45.0s" in text
+
+
+def test_summary_works_with_store_without_keys_method(clock):
+    """自定义 store 没实现 keys() 时降级为只汇总内存样本，不该抛异常。"""
+    class LegacyStore:
+        def __init__(self):
+            self.data = {}
+
+        def samples(self, key):
+            return list(self.data.get(key, []))
+
+        def record(self, key, seconds):
+            self.data.setdefault(key, []).append(float(seconds))
+
+    store = LegacyStore()
+    timer = CycleTimer(store=store, clock=clock)
+    record(timer, clock, 30.0)
+    assert [key for key, _ in timer.summary()] == [KEY]

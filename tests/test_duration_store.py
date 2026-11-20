@@ -92,3 +92,33 @@ def test_database_creates_parent_dir(tmp_path):
     with db.connect() as conn:
         conn.execute("SELECT 1")
     assert (tmp_path / "nested" / "dir" / "x.db").exists()
+
+
+def test_keys_lists_distinct_sorted(store):
+    store.record("soul:round", 1)
+    store.record("soul:battle", 2)
+    store.record("soul:round", 3)
+    store.record("shard:round", 4)
+    assert store.keys() == ["shard:round", "soul:battle", "soul:round"]
+
+
+def test_keys_prefix_filter(store):
+    store.record("soul:round", 1)
+    store.record("soul:battle", 2)
+    store.record("shard:round", 3)
+    assert store.keys("soul:") == ["soul:battle", "soul:round"]
+    assert store.keys("nothing:") == []
+
+
+def test_keys_on_empty_store(store):
+    assert store.keys() == []
+    assert store.keys("soul:") == []
+
+
+def test_keys_escapes_like_wildcards(store):
+    """key 里的 % / _ 不能被当成 LIKE 通配符。"""
+    store.record("a_b", 1)
+    store.record("axb", 2)
+    store.record("a%b", 3)
+    assert store.keys("a_") == ["a_b"]
+    assert store.keys("a%") == ["a%b"]
