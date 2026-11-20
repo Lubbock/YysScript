@@ -325,7 +325,7 @@ python -m pytest tests -q
 - `test_mouse_activation.py`：窗口激活失败时**自动重试**、重试耗尽后跳过操作而不是崩进程、连续失败到上限抛 `WindowActivationError`（YysError）、成功清零连续计数、非礼貌点击路径不受影响。
 - `test_engine.py`：用「假游戏」同时充当 matcher 与 controller，跑通 挑战→战斗→结算→回挑战 的完整事件序列、计时入库、收敛后识图次数下降、残留结算清理、两种超时语义、stop / fail / Ctrl-C。
 - `test_state_machine_scheduler.py`：wait_* 的 `scheduler` 参数生效；**不传时 sleep 序列与改造前逐字一致**。
-- `test_shard_entry_nav.py`：碎片**两种入口同时监听**（跑着跑着会变，不是开局选定）：结算后直接回挑战界面就开战、回章节界面就导航 头像->面板->列表行；watch 顺序保证挑战按钮不被列表行误命中（实测 0.79）挡住；导航界面卡住会补点。
+- `test_shard_entry_nav.py`：碎片**两种入口同时监听**（跑着跑着会变，不是开局选定）：结算后直接回挑战界面就开战、回章节界面就导航 头像->面板->列表行；**watch 顺序**（`detect_first` 顺序优先不看分数，结算模板必须排第一，否则被入口面板误命中 0.85 永久遮蔽 —— 真机卡死过近 4 分钟）；**战斗阶段门控**（导航模板在战斗画面误命中 0.845~0.895，照着点就是在战斗里乱点）；门控挡下的命中不重置状态、改由门控打开的边沿补触发（否则每拍重复 entered 刷爆日志）；导航界面卡住会补点。假游戏里复现了全部四处误命中。
 
 新增状态或流程时，至少保证 `test_states_registry.py` 通过（它会检查模板文件是否存在）。
 
@@ -346,9 +346,17 @@ python -m pytest tests -q
 6. **macOS 长时间挂机限制**：显示器休眠或手机锁屏时，合成点击根本送不到目标窗口。脚本会在检测到「主显示器休眠」时告警一次（`_warn_if_display_asleep`），但修不了它 —— 挂机跑之前要么关掉系统自动休眠，要么 `caffeinate -di python main.py ...`。
    窗口**激活**失败（切窗口、刚唤醒、osascript 超时）已经能自愈：自动重试 -> 跳过本次点击 -> 下一拍重来；连续失败到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才以退出码 1 干净退出。
 7. **7 个新迁移的流程尚未真机验证**：`awake` / `seal` / `heart` / `breakthrough` / `explore` /
-   `event-aband3t` / `event-aj8fer` 都已改成事件驱动，但真机只跑通过 `soul`。
+   `event-aband3t` / `event-aj8fer` 都已改成事件驱动，但真机只跑通过 `soul` 与 `shard`。
    装配层面有演练覆盖（引擎组装、watch 列表、订阅数、超时预算），真实界面时序仍需人工验证；
    出问题时先加 `--no-adaptive-wait` 排除自适应等待的影响。
+   - `shard` 真机跑通 8 轮（292 秒，均值 36.5s/轮，`shard:battle` 8 个样本已收敛 p10=28.3s，
+     0 WARNING / 0 补点），但**只覆盖了「结算后直接回挑战界面」这条入口**；章节入口导航
+     （头像->面板->列表行）目前只有单测覆盖，真机 8 轮里它一次都没出现过。
+   - 碎片模板的误命中都是量出来的（默认阈值 0.7 时）：入口面板在挑战界面 0.925 /
+     结算画面 0.829~0.85 / 战斗画面 0.845~0.895，列表行在挑战界面 0.791，挑战按钮在
+     战斗画面 0.713~0.721。防线是 **watch 顺序**（`detect_first` 顺序优先、不看分数）
+     + **战斗阶段门控** + 把 `SHARD_CHALLENGE` 阈值抬到 0.85，**不是**靠调阈值把误命中
+     压下去 —— 导航模板在真界面上的分数没有整屏截图可量，压阈值会把正常识别一起压没。
 8. **`flows/explore/dog_food.py` 调用了不存在的 `Flow.double_click`**：换狗粮时会 `AttributeError`。
    这是迁移前就存在的缺陷（不是本次引入），本次未修 —— 修法是给 `Flow` 加一个转发到
    `controller.double_click` 的方法。

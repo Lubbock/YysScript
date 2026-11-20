@@ -12,10 +12,16 @@
     结算 --点结算--> 按 script 决定回「挑战界面」还是「章节界面」
     章节界面 --点头像--> 入口面板 --点面板--> 列表行 --点行--> 挑战界面
 
-两处模板误命中也在假游戏里复现（都是真机实测到的）：
-- 挑战界面上「碎片列表行」也会命中（实测 0.791 > 阈值 0.7）；
+四处模板误命中都在假游戏里复现（全是真机实测到的）：
+- 挑战界面上「碎片列表行」命中 0.791、「碎片入口面板」命中 0.925；
+- 战斗画面上「碎片入口面板」命中 0.845~0.895、「挑战按钮」命中 0.713~0.721；
+- 结算画面上「碎片入口面板」命中 0.85；
 - 列表行界面上「章节 Boss 头像」也会命中（行里含同一个头像）。
-watch 顺序必须让更确定的模板赢：挑战按钮 > 列表行 > 入口面板 > Boss 头像。
+
+`detect_first` 是**顺序优先而不是分数优先**，所以 watch 顺序是主要防线：
+结算画面 > 挑战按钮 > 列表行 > 入口面板 > Boss 头像。结算模板必须排第一，否则会被
+入口面板的误命中永久遮蔽（真机因此卡死近 4 分钟点不掉结算）。战斗画面那处另靠
+**阶段门控**兜住：只在 BattleCycle 等挑战按钮时才允许导航动作。
 
 不截屏不点击：machine 与 controller 都是假的，时钟也是假的。
 """
@@ -24,6 +30,8 @@ import pytest
 from config import settings
 from core.errors import FlowAbortedError
 from core.timing import CycleTimer
+from flows.battle_cycle import PHASE_BATTLE, PHASE_CHALLENGE
+from flows.signals import PREFIX_STATE_ENTERED, topic_for
 from flows.shard.shard_flow import NAV_STUCK_RETRY, ShardEntryNav, ShardFlow
 from states.machine import Detection
 from states.shard_battle_end import SHARD_BATTLE_END
@@ -56,11 +64,14 @@ def make_match(state) -> Match:
 class FakeShardGame:
     """假游戏：识别看 self.screen，点击按模板切换界面。"""
 
-    #: 每个界面上能匹配到的状态。两处误命中是故意留下的（见模块 docstring）
+    #: 每个界面上能匹配到的状态。四处误命中是故意留下的（见模块 docstring）
     SCREENS = {
-        "challenge": (SHARD_CHALLENGE, SHARD_FRAGMENT_ROW),   # 列表行模板误命中 0.791
-        "battle": (),
-        "end": (SHARD_BATTLE_END,),
+        # 挑战界面：列表行误命中 0.791、入口面板误命中 0.925（都超过默认阈值）
+        "challenge": (SHARD_CHALLENGE, SHARD_FRAGMENT_ROW, SHARD_FRAGMENT_ENTRY),
+        # 战斗画面：入口面板误命中 0.845~0.895
+        "battle": (SHARD_FRAGMENT_ENTRY,),
+        # 结算画面：入口面板误命中 0.85 —— 排序不对就会永久遮蔽结算识别
+        "end": (SHARD_BATTLE_END, SHARD_FRAGMENT_ENTRY),
         "chapter": (SHARD_CHAPTER_BOSS,),
         "entry": (SHARD_FRAGMENT_ENTRY,),
         "row": (SHARD_FRAGMENT_ROW, SHARD_CHAPTER_BOSS),      # 行里含同一个头像
@@ -84,12 +95,19 @@ class FakeShardGame:
 
     # ------------------------------------------------------------ machine
     def detect_first(self, candidates):
+        # 战斗进行中也要按「战斗画面」去识别：真机上导航模板在战斗画面上会误命中
+        # （入口面板 0.845~0.895）。早先这里直接 return None，等于把那个误命中完全
+        # 模拟掉了 —— 门控看着有测试覆盖，其实是假通过。
         if self._battle_until is not None:
             if self.clock() < self._battle_until:
-                return None
-            self._battle_until = None
-            self.screen = "end"
-        present = self.SCREENS[self.screen]
+                screen = "battle"
+            else:
+                self._battle_until = None
+                self.screen = "end"
+                screen = "end"
+        else:
+            screen = self.screen
+        present = self.SCREENS[screen]
         for candidate in candidates:          # 顺序即优先级
             if candidate in present:
                 return Detection(state=candidate, match=make_match(candidate))
@@ -243,6 +261,7 @@ def test_watch_order_is_stable_after_battle_cycle_attaches(clock, store):
     ShardEntryNav(engine).attach()
     keys = [getattr(state, "key", state) for state in engine.watched]
 
+    assert keys.index(SHARD_BATTLE_END.key) < keys.index(SHARD_CHALLENGE.key)
     assert keys.index(SHARD_CHALLENGE.key) < keys.index(SHARD_FRAGMENT_ROW.key)
     assert keys.index(SHARD_FRAGMENT_ROW.key) < keys.index(SHARD_FRAGMENT_ENTRY.key)
     assert keys.index(SHARD_FRAGMENT_ENTRY.key) < keys.index(SHARD_CHAPTER_BOSS.key)
@@ -286,3 +305,115 @@ def test_cli_has_no_shard_mode_argument():
 
     with pytest.raises(SystemExit):
         build_parser().parse_args(["shard", "--times", "1", "--shard-mode", "chapter"])
+
+
+# --------------------------------------------------------------------------- #
+# 战斗阶段门控：真机跑出来的坑
+# --------------------------------------------------------------------------- #
+class FakeCycle:
+    """只暴露 phase 的假 BattleCycle，用来单测门控。"""
+
+    def __init__(self, phase: str) -> None:
+        self.phase = phase
+
+
+def test_no_navigation_clicks_during_battle(clock, store):
+    """战斗画面上入口面板误命中（实测 0.845）时，绝不能点它。
+
+    真机复现过：点挑战进战斗后，导航订阅方把误命中的「式神碎片」入口面板点在了
+    (653, 141)（右上角），卡住补点又点了两次，一场战斗被点乱、结算画面也没识别到。
+    """
+    game = FakeShardGame(clock, script=["challenge"])
+    flow = make_flow(game, clock, store, times=2)
+
+    flow.run()
+
+    assert game.clicks == [CH, END, CH, END]
+    assert not [c for c in game.clicks if c in NAV], "战斗期间点到了导航模板"
+
+
+def test_gate_blocks_navigation_outside_challenge_phase(clock, store):
+    """门控本身：phase != challenge 时不点击，但保留当前状态。"""
+    game = FakeShardGame(clock)
+    game.screen = "chapter"
+    engine = make_flow(game, clock, store, times=1).create_engine()
+    nav = ShardEntryNav(engine, cycle=FakeCycle(PHASE_BATTLE)).attach()
+
+    engine.observe()          # 识别到 Boss 头像 -> entered -> 被门控挡下
+
+    assert game.clicks == [], "战斗阶段不该产生任何点击"
+    assert nav._last_click_key == ""
+    # 被挡下的命中**不该**重置：重置会让每一拍都重新触发 entered，把日志刷爆
+    # （真机 4 分钟刷了 50 多条）。补触发交给 _sync_gate() 抓门控打开的边沿。
+    assert engine.current is not None
+    assert engine.current.state is SHARD_CHAPTER_BOSS
+    assert nav._gate_open is False
+
+
+def test_gate_opening_retriggers_navigation(clock, store):
+    """门控放开后，同一个界面还能点 —— 这正是 _sync_gate() 补触发的意义。"""
+    game = FakeShardGame(clock)
+    game.screen = "chapter"
+    engine = make_flow(game, clock, store, times=1).create_engine()
+    cycle = FakeCycle(PHASE_BATTLE)
+    ShardEntryNav(engine, cycle=cycle).attach()
+
+    engine.observe()
+    assert game.clicks == []
+
+    cycle.phase = PHASE_CHALLENGE
+    engine.observe()          # _current 已被重置，同一界面会再触发一次 entered
+
+    assert game.clicks == [BOSS]
+
+
+def test_nav_without_cycle_is_not_gated(clock, store):
+    """不传 cycle（单测里单独挂 nav）时不门控，保持原行为。"""
+    game = FakeShardGame(clock)
+    game.screen = "chapter"
+    engine = make_flow(game, clock, store, times=1).create_engine()
+    ShardEntryNav(engine).attach()
+
+    engine.observe()
+
+    assert game.clicks == [BOSS]
+
+
+# --------------------------------------------------------------------------- #
+# 顺序优先（不是分数优先）：真机卡死 4 分钟的那个坑
+# --------------------------------------------------------------------------- #
+def test_settlement_not_shadowed_by_entry_false_positive(clock, store):
+    """结算画面上入口面板也误命中（实测 0.85）时，结算模板必须赢。
+
+    真机事故：`SHARD_FRAGMENT_ENTRY` 排在 `SHARD_BATTLE_END` 前面，而 detect_first
+    是顺序优先、不看分数 —— 结算画面被永久遮蔽，脚本卡了近 4 分钟点不掉结算，
+    最后只能人工中断。
+    """
+    game = FakeShardGame(clock)
+    game.screen = "end"
+    engine = make_flow(game, clock, store, times=1).create_engine()
+    ShardEntryNav(engine).attach()
+
+    detection = engine.observe()
+
+    assert detection is not None
+    assert detection.state is SHARD_BATTLE_END
+
+
+def test_battle_false_positive_fires_entered_once_not_every_poll(clock, store):
+    """门控挡下的命中不该每拍重复触发 entered（真机 4 分钟刷了 50 多条日志）。"""
+    game = FakeShardGame(clock, script=["challenge"])
+    flow = make_flow(game, clock, store, times=2)
+    seen = []
+    flow.on(topic_for(PREFIX_STATE_ENTERED, SHARD_FRAGMENT_ENTRY), seen.append)
+
+    flow.run()
+
+    # 两场战斗 = 两次 entered；改之前每一拍（3 秒）都会重来一次
+    assert len(seen) == 2
+
+
+def test_challenge_threshold_excludes_battle_false_positive():
+    """挑战按钮阈值必须卡在「战斗画面误命中」与「挑战界面真命中」之间。"""
+    assert SHARD_CHALLENGE.threshold > 0.721, "战斗画面实测误命中上界 0.721"
+    assert SHARD_CHALLENGE.threshold < 0.995, "挑战界面实测真命中下界 0.995"

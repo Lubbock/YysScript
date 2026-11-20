@@ -125,6 +125,16 @@ class BattleCycle:
         self._challenge_seen = False
         self._battle_cycle: Optional[Cycle] = None
 
+    @property
+    def phase(self) -> str:
+        """当前阶段（PHASE_CHALLENGE / PHASE_BATTLE / PHASE_SETTLE）。
+
+        给同一引擎上的其它订阅方做门控用的只读视图：例如碎片的入口导航订阅方
+        必须知道「现在是不是在打战斗」—— 战斗画面上导航模板会误命中（实测
+        「式神碎片」入口面板 0.845），照着点就是在战斗里乱点按钮。
+        """
+        return self._phase
+
     # ------------------------------------------------------------------ 挂载
     def attach(self) -> "BattleCycle":
         """登记要识别的状态并订阅事件；返回自身以便链式调用。"""

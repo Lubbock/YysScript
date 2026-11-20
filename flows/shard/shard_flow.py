@@ -37,7 +37,7 @@ from actions.controller import GameController
 from core.bus import Subscription
 from core.logger import get_logger
 from flows.base import Flow
-from flows.battle_cycle import BattleCycle
+from flows.battle_cycle import PHASE_CHALLENGE, BattleCycle
 from flows.signals import (
     PREFIX_STATE_ENTERED,
     TOPIC_POLL_COMPLETED,
@@ -58,30 +58,48 @@ NAV_STUCK_RETRY = 8.0
 class ShardEntryNav:
     """章节入口导航订阅方：头像 -> 入口面板 -> 列表行，看到哪个点哪个。
 
-    不做阶段门控：一轮可能从任意界面开始，且两种入口会随机交替出现，
+    **不做导航顺序门控**：一轮可能从任意界面开始，且两种入口会随机交替出现，
     线性门控（必须先 A 再 B 再 C）会把「开局就在列表界面」这种情况挡死。
-    靠两点保证不乱点：
+    靠四点保证不乱点（每一条都是真机踩出来的）：
     1. `state.entered` 只在界面**跳变**时触发，停留在同一界面不会重复点；
-    2. watch 顺序让更确定的模板优先（挑战按钮 > 列表行 > 面板 > 头像）。
+    2. watch 顺序 = 结算画面 > 挑战按钮 > 列表行 > 面板 > 头像。`detect_first` 是
+       顺序优先而不是分数优先，所以结算模板必须排第一，否则会被导航模板的误命中
+       永久遮蔽（真机卡死过一次）；
+    3. **战斗阶段门控**（需要 cycle）：导航模板在战斗画面上也会误命中 —— 真机实测
+       「式神碎片」入口面板在战斗画面上 0.845~0.895、在挑战画面上 0.925，都远超阈值，
+       照着点就是在战斗里乱点按钮（实测点到了右上角）。所以只在 BattleCycle 处于
+       `challenge` 阶段（即正在等挑战按钮）时才允许导航动作；
+    4. 门控挡下的命中**不**重置状态，改由「门控打开」的边沿补触发一次（`_sync_gate`），
+       否则战斗期间每一拍都重复触发 entered，日志被刷爆。
     """
+    #: 属于「导航链」的状态：门控放开的那一刻需要补触发的就是这几个
+    NAV_STATES = (SHARD_CHAPTER_BOSS, SHARD_FRAGMENT_ENTRY, SHARD_FRAGMENT_ROW)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine, cycle=None) -> None:
+        """cycle：同一引擎上的 BattleCycle，用来读 phase 做门控；None 表示不门控。"""
         self.engine = engine
+        self.cycle = cycle
         self.log = get_logger("flows.{}".format(engine.name))
         self._subs: List[Subscription] = []
         #: 最近一次导航点击：(状态 key, 本轮内时刻, 命中框)，用于卡住重试
         self._last_click_key = ""
         self._last_click_at = -1.0
         self._last_click_match = None
+        #: 门控上一次是否打开，用于抓「战斗结束 -> 允许导航」这个边沿
+        self._gate_open = True
 
     # ------------------------------------------------------------------ 挂载
     def attach(self) -> "ShardEntryNav":
         engine = self.engine
-        # 顺序即 detect_first 的优先级：
-        # - 挑战按钮第一：挑战界面上列表行模板会误命中（实测 0.79），不能让它挡住挑战
-        # - 列表行在头像前：列表界面上两者都命中（行内含同一个头像），取更具体的行
-        engine.watch(SHARD_CHALLENGE, SHARD_FRAGMENT_ROW, SHARD_FRAGMENT_ENTRY,
-                     SHARD_CHAPTER_BOSS, SHARD_BATTLE_END)
+        # 顺序即 detect_first 的优先级。**detect_first 是顺序优先、不是分数优先**：
+        # 排在前面的模板只要过了阈值就赢，哪怕分数比后面的低。所以「绝不能被误命中
+        # 遮蔽」的模板必须排最前：
+        # - 结算画面第一：导航模板在结算画面上也会误命中（实测入口面板 0.85）。排在
+        #   结算前面就会永久遮蔽结算识别 —— 真机因此卡死近 4 分钟点不掉结算；
+        # - 挑战按钮第二：挑战界面上列表行(0.791) / 入口面板(0.925) 都会误命中；
+        # - 列表行在头像前：列表界面上两者都命中（行内含同一个头像），取更具体的行。
+        engine.watch(SHARD_BATTLE_END, SHARD_CHALLENGE, SHARD_FRAGMENT_ROW,
+                     SHARD_FRAGMENT_ENTRY, SHARD_CHAPTER_BOSS)
         self._subs = [
             engine.on(topic_for(PREFIX_STATE_ENTERED, SHARD_CHAPTER_BOSS), self.on_boss),
             engine.on(topic_for(PREFIX_STATE_ENTERED, SHARD_FRAGMENT_ENTRY), self.on_entry),
@@ -109,10 +127,17 @@ class ShardEntryNav:
         self._click(event, "点击碎片列表行")
 
     def on_poll(self, event: PollEvent) -> None:
-        """卡在同一个导航界面太久（游戏吞了点击）就再点一次。"""
-        if self.engine.interrupted or not self._last_click_key:
+        """每拍两件事：门控刚打开时补触发导航；卡在同一界面太久就补点。"""
+        if self.engine.interrupted:
+            return
+        self._sync_gate()
+        if not self._last_click_key:
             return
         if event.state_key != self._last_click_key:
+            return
+        if not self._navigation_open():
+            # 战斗打起来了就别再补点了：这一拍的命中多半是误命中（见 _click）
+            self._last_click_key = ""
             return
         waited = self.engine.elapsed_round() - self._last_click_at
         if waited < NAV_STUCK_RETRY:
@@ -142,6 +167,13 @@ class ShardEntryNav:
     def _click(self, event: StateEvent, detail: str) -> None:
         if self.engine.interrupted or event.match is None:
             return
+        if not self._navigation_open():
+            # 战斗 / 结算阶段绝不点导航模板：导航模板在战斗画面上会误命中
+            # （实测「式神碎片」入口面板 0.845~0.895，真机点到了右上角）。
+            # 这里**故意不**重置当前状态：否则每一拍都会重新触发一次 entered，
+            # 日志被刷爆（实测 4 分钟刷了 50 多条）而且毫无意义 —— 门控期间本来就不动手。
+            # 需要补触发的时机由 _sync_gate() 抓「门控打开」的边沿统一处理。
+            return
         if self.engine.click(event.match, state_key=event.key, detail=detail) is None:
             # 点击没送达（窗口激活失败）：重置当前状态，下一拍重新触发 entered 再点
             self.engine.reset_current()
@@ -149,6 +181,31 @@ class ShardEntryNav:
         self._last_click_key = event.key
         self._last_click_at = self.engine.elapsed_round()
         self._last_click_match = event.match
+
+    def _navigation_open(self) -> bool:
+        """现在允不允许做导航动作：只有在「等挑战按钮」的阶段才允许。
+
+        战斗 / 结算阶段导航模板会误命中（真机实测：入口面板在战斗画面 0.845、
+        在挑战画面 0.925，阈值只有 0.7），照着点就是在战斗里乱点按钮。
+        没传 cycle（单测里单独挂 nav）时不门控，保持原来的行为。
+        """
+        return self.cycle is None or self.cycle.phase == PHASE_CHALLENGE
+
+    def _sync_gate(self) -> None:
+        """抓「门控由关到开」这个边沿，补触发一次当前界面的导航。
+
+        战斗期间导航模板误命中被门控挡下、且不重置状态（见 `_click`），所以战斗结束
+        时 `_current` 可能还停在那个误命中的导航状态上。若此刻画面真的回到了章节 /
+        面板 / 列表界面，`state.entered` 不会再触发，导航就永远开不了头。这里在门控
+        打开的那一拍把 `_current` 清掉，让同一界面重新产生一次 entered。
+        """
+        opened = self._navigation_open()
+        if opened and not self._gate_open:
+            current = self.engine.current
+            if current is not None and current.state in self.NAV_STATES:
+                self.log.debug("门控打开，重新识别当前导航界面 %s", current.state.key)
+                self.engine.reset_current()
+        self._gate_open = opened
 
 
 class ShardFlow(Flow):
@@ -192,9 +249,7 @@ class ShardFlow(Flow):
     def run(self) -> None:
         self.log.info("开始刷式神碎片，共 %s 次", self.times)
         engine = self.create_engine()
-        # 两种重新挑战的入口同时监听：直接回挑战界面 / 回章节界面需导航一圈
-        ShardEntryNav(engine).attach()
-        BattleCycle(
+        cycle = BattleCycle(
             engine,
             challenge=SHARD_CHALLENGE,
             end_states=self.END_STATES,
@@ -207,7 +262,11 @@ class ShardFlow(Flow):
             challenge_timeout=self.CHALLENGE_TIMEOUT,
             battle_timeout=self.BATTLE_TIMEOUT,
             missing_challenge_message=self.MISSING_CHALLENGE_MESSAGE,
-        ).attach()
+        )
+        # 导航订阅方要读 cycle.phase 做门控，所以 cycle 先构造；但**先挂 nav**：
+        # watch 顺序即优先级，必须由 nav 定下「挑战按钮排第一」（见 attach 注释）
+        ShardEntryNav(engine, cycle=cycle).attach()
+        cycle.attach()
         engine.run_rounds(
             self.times,
             round_timeout=(self.CHALLENGE_TIMEOUT + self.BATTLE_TIMEOUT
