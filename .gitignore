@@ -13,3 +13,9 @@ var/
 .idea/
 .vscode/
 .DS_Store
+
+# 隔离开发的 git worktree（放在仓库内的隐藏目录，pytest 不会重复收集）
+.worktrees/
+
+# PI-Desktop 计划产物
+.pi/
