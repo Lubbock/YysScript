@@ -135,7 +135,7 @@ HOME = State(
 | `breakthrough/` | `breakthrough` | `scripts/fight.py` |
 | `seal/` | `seal` | `scripts/dogger.py` |
 | `heart_dojo/` | `heart` | `scripts/heart.py` |
-| `shard/` | `shard` | —（式神碎片挑战循环，模板匹配驱动，支持 iOS 镜像；`--shard-mode chapter` 走章节入口导航） |
+| `shard/` | `shard` | —（式神碎片挑战循环，模板匹配驱动，支持 iOS 镜像；两种入口同时监听，无需选模式） |
 | `events/` | `event-aband3t` / `event-aj8fer` | `scripts/abnd3t.py`、`scripts/aj8fer.py` |
 
 - `base.py`：`Flow` 基类（`click` / `drag` / `scroll` / `is_active` / `locate` / `wait` / `expect` / `wait_gone` / `wait_any` / `click_state` / `on` / `publish` / `cycle` / `wait_plan` / `create_engine` / `prepare` / `run` / `execute`）与 `RetryGuard`。
@@ -154,7 +154,7 @@ HOME = State(
 - `rules.py`：`ProbeWhileWaiting` —— 通用的「边等边点」订阅方，替代旧的 `on_wait=lambda: click(...)`。
 - **9 个流程全部已迁移到事件驱动**：`run()` 只负责组装引擎 + 挂订阅方 + `run_rounds()`。
   流程自己的规则写成同文件里的订阅方类（`AwakeRound` / `SealRound` / `HeartRound` /
-  `BreakthroughSweep` / `ExploreSweep`），只订阅 topic、只调 engine 的公开方法，不碰 machine / controller。
+  `BreakthroughSweep` / `ExploreSweep` / `ShardEntryNav`），只订阅 topic、只调 engine 的公开方法，不碰 machine / controller。
 
 ### `tools/` — 维护工具与周边归档（都不参与主流程）
 
@@ -288,7 +288,6 @@ python main.py --check           # 自检：模板是否齐全 + 能否定位游
 python main.py explore --times 10 --exp-only
 python main.py soul --times 30
 python main.py shard --times 10     # 式神碎片挑战循环（macOS + iOS 镜像可用）
-python main.py shard --times 10 --shard-mode chapter  # 碎片：结算后回章节界面，导航 头像->面板->列表行 再挑战
 python main.py awake --dungeon 4 --times 20
 python main.py breakthrough --times 3      # 不传 --times 则无限循环
 python main.py seal --times 50
@@ -326,6 +325,7 @@ python -m pytest tests -q
 - `test_mouse_activation.py`：窗口激活失败时**自动重试**、重试耗尽后跳过操作而不是崩进程、连续失败到上限抛 `WindowActivationError`（YysError）、成功清零连续计数、非礼貌点击路径不受影响。
 - `test_engine.py`：用「假游戏」同时充当 matcher 与 controller，跑通 挑战→战斗→结算→回挑战 的完整事件序列、计时入库、收敛后识图次数下降、残留结算清理、两种超时语义、stop / fail / Ctrl-C。
 - `test_state_machine_scheduler.py`：wait_* 的 `scheduler` 参数生效；**不传时 sleep 序列与改造前逐字一致**。
+- `test_shard_entry_nav.py`：碎片**两种入口同时监听**（跑着跑着会变，不是开局选定）：结算后直接回挑战界面就开战、回章节界面就导航 头像->面板->列表行；watch 顺序保证挑战按钮不被列表行误命中（实测 0.79）挡住；导航界面卡住会补点。
 
 新增状态或流程时，至少保证 `test_states_registry.py` 通过（它会检查模板文件是否存在）。
 

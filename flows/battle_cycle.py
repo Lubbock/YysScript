@@ -63,9 +63,10 @@ class BattleCycle:
         retry_pause       : 每次补点之间的缓冲等待（御魂用 2 秒）
         back_timeout      : 每次「等挑战界面回来」的超时
         back_interval     : 等挑战界面回来的轮询间隔
-        wait_back         : 点完结算后是否等挑战界面回来（默认 True）。走章节入口的流程
-                            （shard --shard-mode chapter）点完结算后画面去的是章节界面，
-                            要导航一圈挑战按钮才出现，应设 False，否则每轮白等并告警
+        wait_back         : 点完结算后是否等挑战界面回来（默认 True）。结算后画面不一定
+                            回到挑战界面时应设 False，否则每轮白等并告警（shard 的章节
+                            入口：结算后被踢回章节界面，要导航 头像->面板->列表行 一圈
+                            挑战按钮才出现）
         challenge_timeout : 一轮里等挑战按钮的预算，超了就按旧行为中止流程；None 表示不检查
         battle_timeout    : 一场战斗的预算，超了就按旧行为告警并进入下一轮；None 表示不检查
         missing_challenge_message: 挑战按钮始终没出现时的报错文案（保持与旧实现一致）
