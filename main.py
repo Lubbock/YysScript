@@ -8,6 +8,7 @@
     python main.py explore --times 10     # 自动探索 10 轮
     python main.py soul --times 30        # 自动御魂 30 次
     python main.py shard --times 10     # 式神碎片挑战循环
+    python main.py shard --times 10 --shard-mode chapter  # 碎片：章节入口模式
     python main.py awake --dungeon 4 --times 20
     python main.py breakthrough --times 3 # 3 轮结界突破（不传则无限循环）
     python main.py seal --times 50
@@ -59,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exp-only", action="store_true", help="探索时只打经验怪")
     parser.add_argument("--dungeon", type=int, default=4,
                         help="觉醒副本序号：1 火御魂 2 风麒麟 3 水麒麟 4 雷麒麟")
+    parser.add_argument("--shard-mode", choices=("simple", "chapter"), default="simple",
+                        help="式神碎片入口模式：simple=结算后直接回挑战界面；"
+                             "chapter=结算后回章节界面，需导航 头像->面板->列表行 再挑战")
     parser.add_argument("--fullscreen", action="store_true",
                         help="不找游戏窗口，直接把整个屏幕当客户区")
     parser.add_argument("--no-humanize", action="store_true",
@@ -173,6 +177,8 @@ def build_flow(name: str, args: argparse.Namespace):
         kwargs["exp_only"] = args.exp_only
     if name == "awake":
         kwargs["dungeon"] = args.dungeon
+    if name == "shard":
+        kwargs["mode"] = args.shard_mode
     return flow_class(controller=controller, **kwargs)
 
 

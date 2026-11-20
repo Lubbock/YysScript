@@ -20,7 +20,7 @@ flows 下的每个功能都继承 Flow，只写业务编排，不直接碰 pyaut
 from __future__ import annotations
 
 import time
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 from actions.controller import GameController
 from config import settings
@@ -62,6 +62,8 @@ class Flow:
         bus: Optional[EventBus] = None,
         timer: Optional[CycleTimer] = None,
         adaptive: Optional[bool] = None,
+        clock: Optional[Callable[[], float]] = None,
+        sleeper: Optional[Callable[[float], None]] = None,
     ) -> None:
         """
         controller / machine : 不传就自动装配（真机运行走这条）
@@ -69,12 +71,16 @@ class Flow:
         timer                : 循环计时器，默认新建并绑定到 bus（commit 时广播）
         adaptive             : None = 跟随 settings.ADAPTIVE_WAIT
                                （命令行 --no-adaptive-wait / YYS_ADAPTIVE_WAIT=0 会改它）
+        clock / sleeper    : 测试缝：注入假时钟与假 sleep，让引擎的轮询 / 盲等
+                               在单测里瞬时完成；真机运行不传，走 time.monotonic
         """
         self.controller = controller or GameController()
         self.machine = machine or StateMachine(self.controller.matcher)
         self.predictor = WaitPredictor()
         self.bus = bus or EventBus()
         self.timer = timer or CycleTimer(bus=self.bus, adaptive=adaptive)
+        self._clock = clock
+        self._sleeper = sleeper
         #: create_engine() 产出的引擎；execute() 靠它判断要不要重复打总账
         self._engine = None
         self.log = get_logger("flows.{}".format(self.name))
@@ -228,6 +234,10 @@ class Flow:
         kwargs.setdefault("controller", self.controller)
         kwargs.setdefault("bus", self.bus)
         kwargs.setdefault("timer", self.timer)
+        if self._clock is not None:
+            kwargs.setdefault("clock", self._clock)
+        if self._sleeper is not None:
+            kwargs.setdefault("sleeper", self._sleeper)
         self._engine = FlowEngine(name or self.name, **kwargs)
         return self._engine
 

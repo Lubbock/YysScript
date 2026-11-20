@@ -135,7 +135,7 @@ HOME = State(
 | `breakthrough/` | `breakthrough` | `scripts/fight.py` |
 | `seal/` | `seal` | `scripts/dogger.py` |
 | `heart_dojo/` | `heart` | `scripts/heart.py` |
-| `shard/` | `shard` | —（新增：式神碎片挑战循环，模板匹配驱动，支持 iOS 镜像） |
+| `shard/` | `shard` | —（式神碎片挑战循环，模板匹配驱动，支持 iOS 镜像；`--shard-mode chapter` 走章节入口导航） |
 | `events/` | `event-aband3t` / `event-aj8fer` | `scripts/abnd3t.py`、`scripts/aj8fer.py` |
 
 - `base.py`：`Flow` 基类（`click` / `drag` / `scroll` / `is_active` / `locate` / `wait` / `expect` / `wait_gone` / `wait_any` / `click_state` / `on` / `publish` / `cycle` / `wait_plan` / `create_engine` / `prepare` / `run` / `execute`）与 `RetryGuard`。
@@ -288,6 +288,7 @@ python main.py --check           # 自检：模板是否齐全 + 能否定位游
 python main.py explore --times 10 --exp-only
 python main.py soul --times 30
 python main.py shard --times 10     # 式神碎片挑战循环（macOS + iOS 镜像可用）
+python main.py shard --times 10 --shard-mode chapter  # 碎片：结算后回章节界面，导航 头像->面板->列表行 再挑战
 python main.py awake --dungeon 4 --times 20
 python main.py breakthrough --times 3      # 不传 --times 则无限循环
 python main.py seal --times 50

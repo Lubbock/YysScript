@@ -63,6 +63,9 @@ class BattleCycle:
         retry_pause       : 每次补点之间的缓冲等待（御魂用 2 秒）
         back_timeout      : 每次「等挑战界面回来」的超时
         back_interval     : 等挑战界面回来的轮询间隔
+        wait_back         : 点完结算后是否等挑战界面回来（默认 True）。走章节入口的流程
+                            （shard --shard-mode chapter）点完结算后画面去的是章节界面，
+                            要导航一圈挑战按钮才出现，应设 False，否则每轮白等并告警
         challenge_timeout : 一轮里等挑战按钮的预算，超了就按旧行为中止流程；None 表示不检查
         battle_timeout    : 一场战斗的预算，超了就按旧行为告警并进入下一轮；None 表示不检查
         missing_challenge_message: 挑战按钮始终没出现时的报错文案（保持与旧实现一致）
@@ -80,6 +83,7 @@ class BattleCycle:
         retry_pause: float = 2.0,
         back_timeout: float = 6.0,
         back_interval: float = 2.0,
+        wait_back: bool = True,
         challenge_timeout: Optional[float] = None,
         battle_timeout: Optional[float] = None,
         missing_challenge_message: Optional[str] = None,
@@ -102,6 +106,7 @@ class BattleCycle:
         self.retry_pause = float(retry_pause)
         self.back_timeout = float(back_timeout)
         self.back_interval = float(back_interval)
+        self.wait_back = bool(wait_back)
         self.challenge_timeout = challenge_timeout
         self.battle_timeout = battle_timeout
         self.missing_challenge_message = missing_challenge_message or (
@@ -202,7 +207,7 @@ class BattleCycle:
         if self.settle_pause > 0:
             self.engine.sleep(self.settle_pause)
 
-        back = self._back_to_challenge(settle_match)
+        back = self._back_to_challenge(settle_match) if self.wait_back else False
         if in_battle:
             self.engine.finish_round("结算完成，已回到挑战界面" if back else "结算完成")
         else:

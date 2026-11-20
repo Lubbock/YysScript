@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Type
 FLOW_SPECS: Dict[str, Tuple[str, str, str]] = {
     "explore": ("flows.explore.explore_flow", "ExploreFlow", "自动探索（扫怪 / 换狗粮 / 领 Boss 奖励）"),
     "soul": ("flows.soul.soul_flow", "SoulFlow", "自动御魂"),
-    "shard": ("flows.shard.shard_flow", "ShardFlow", "自动式神碎片（挑战循环，支持 iOS 镜像）"),
+    "shard": ("flows.shard.shard_flow", "ShardFlow", "自动式神碎片（挑战循环，支持 iOS 镜像；--shard-mode chapter 走章节入口导航）"),
     "awake": ("flows.awake.awake_flow", "AwakeFlow", "自动觉醒材料"),
     "breakthrough": ("flows.breakthrough.breakthrough_flow", "BreakthroughFlow", "自动结界突破"),
     "seal": ("flows.seal.seal_flow", "SealFlow", "自动妖气封印（组队刷）"),

@@ -14,6 +14,7 @@ import pytest
 from PIL import Image
 
 flask = pytest.importorskip("flask", reason="模板管理工具需要 flask")
+import states as states_pkg  # 状态总数动态取，避免每加一个状态就要改契约测试
 
 TOOL = Path(__file__).resolve().parents[1] / "tools" / "asset_manager" / "app.py"
 
@@ -61,7 +62,8 @@ def test_info_shape(env):
     for key in ("capture", "capture_error", "match", "match_error"):
         assert key in data["capabilities"], "capabilities 缺字段: {}".format(key)
 
-    assert data["counts"]["states"] == 37
+    # 状态总数不硬编码：契约要锁的是字段形状与自洽关系，不是具体数量
+    assert data["counts"]["states"] == len(states_pkg.all_states())
     assert data["counts"]["screen"] + data["counts"]["marker"] == data["counts"]["states"]
     assert isinstance(data["capabilities"]["match"], bool)
     assert len(data["base_client_size"]) == 2
@@ -76,8 +78,8 @@ def test_info_reports_missing_and_orphans(env):
     assert "scc.png" in data["counts"]["orphans"]
     assert "首页.png" not in data["counts"]["missing"]
     assert "EXPLORE_MAP" not in str(data["counts"]["missing"])  # 该状态模板仍缺失
-    assert len(data["counts"]["missing"]) == 36          # 37 个状态只补了 1 张图
-
+    # 只补了「首页.png」一张图，其余每个状态各缺一张模板
+    assert len(data["counts"]["missing"]) == len(states_pkg.all_states()) - 1
 
 # --------------------------------------------------------------------------- #
 # /api/states —— 卡片网格
@@ -85,8 +87,7 @@ def test_info_reports_missing_and_orphans(env):
 def test_states_shape(env):
     mod, tpl, client = env
     states = client.get("/api/states").get_json()
-    assert len(states) == 37
-
+    assert len(states) == len(states_pkg.all_states())
     by_key = {s["key"]: s for s in states}
     home = by_key["HOME"]
     for key in ("key", "label", "kind", "threshold", "description", "used_by", "templates"):
