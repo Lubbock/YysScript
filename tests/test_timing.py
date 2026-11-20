@@ -241,6 +241,75 @@ def test_outliers_do_not_push_blind_wait_up_over_time(timer, clock):
     assert blind_after <= blind_before + 1.0
 
 
+def test_tiny_baseline_does_not_flag_real_sample_as_outlier(timer, clock):
+    """真机复现：soul:challenge 的历史样本是 0.045 秒（点完结算瞬间就回到挑战界面）。
+
+    纯相对判据（> p50 × 2.5）此时阈值只有 0.11 秒，于是真实的 20.5 秒
+    （补点两次才回去）被判成异常剔除，窗口里永远只剩极小值 ->
+    usable 永远到不了 warm-up 门槛 -> 永久不收敛。
+    """
+    record(timer, clock, 0.045)
+    record(timer, clock, 20.5)
+
+    estimate = timer.estimate(KEY)
+    assert estimate.overruns == 0, "没有基线就不该判异常"
+    assert estimate.usable == 2
+    assert estimate.p50 == pytest.approx((0.045 + 20.5) / 2)
+
+
+def test_no_outlier_policing_before_warmup(timer, clock):
+    """warm-up 阶段一律放行：先攒够样本，才谈得上什么叫异常。"""
+    for value in (0.04, 600.0, 0.03, 900.0):
+        record(timer, clock, value)
+    assert timer.estimate(KEY).overruns == 0
+    assert timer.estimate(KEY).samples == 4
+
+
+def test_absolute_floor_protects_short_phases(timer, clock):
+    """收敛之后同样要有绝对下限：5 个 0.04 秒的样本不该让 20 秒变成异常。"""
+    for _ in range(settings.TIMING_WARMUP_SAMPLES):
+        record(timer, clock, 0.04)
+    assert timer.estimate(KEY).converged is True
+
+    record(timer, clock, 20.0)
+    estimate = timer.estimate(KEY)
+    assert estimate.overruns == 0
+    assert estimate.usable == settings.TIMING_WARMUP_SAMPLES + 1
+
+
+def test_bimodal_phase_still_converges(timer, clock):
+    """双峰阶段（要么瞬间返回、要么补点花 20 秒）必须能收敛，不能永久卡住。"""
+    for _ in range(settings.TIMING_WARMUP_SAMPLES):
+        record(timer, clock, 0.04)
+        record(timer, clock, 20.0)
+
+    estimate = timer.estimate(KEY)
+    assert estimate.converged is True
+    assert estimate.overruns == 0
+    # p10 落在「瞬间返回」那一侧，所以盲等接近 0 —— 对双峰阶段这是正确行为
+    assert timer.plan(KEY, 300.0, 2.0).blind_wait < 1.0
+
+
+def test_relative_rule_still_dominates_for_long_phases(timer, clock):
+    """绝对下限不能削弱主场景：战斗几十秒时，200 秒仍然算异常。"""
+    warm_up(timer, clock, seconds=60.0)
+    record(timer, clock, 200.0)
+
+    estimate = timer.estimate(KEY)
+    assert estimate.overruns == 1
+    assert estimate.minimum == pytest.approx(60.0)
+    assert estimate.usable == settings.TIMING_WARMUP_SAMPLES
+
+
+def test_outlier_limit_takes_the_larger_of_both_rules():
+    from core.timing import _outlier_limit
+
+    # 长耗时阶段：相对倍数占主导
+    assert _outlier_limit(60.0) == pytest.approx(60.0 * settings.TIMING_OUTLIER_FACTOR)
+    # 极短耗时阶段：绝对下限兜底，阈值不会退化到近 0
+    assert _outlier_limit(0.04) == pytest.approx(0.04 + settings.TIMING_OUTLIER_FLOOR)
+
+
 def test_discard_does_not_write_sample(timer, clock, store):
     cycle = timer.begin(KEY)
     clock.advance(120.0)

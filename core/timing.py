@@ -22,8 +22,10 @@
 会把分位数顶高 → 下次盲等更久 → 样本更大 → **最小值永远收敛不下来**。
 
 对策（三条一起用）：
-1. **异常值剔除**：`s > p50 * TIMING_OUTLIER_FACTOR` 的样本不计入 min/p10，
-   只累加 overruns（仍然写库，便于事后审计）；
+1. **异常值剔除**：超过 `max(p50 × TIMING_OUTLIER_FACTOR, p50 + TIMING_OUTLIER_FLOOR)`
+   的样本不计入 min/p10，只累加 overruns（仍然写库，便于事后审计）；
+   **可用样本不足 `TIMING_WARMUP_SAMPLES` 时一律不判异常** —— 没有基线就谈不上异常，
+   否则一个偶然很小的样本会把阈值压到近 0，之后真实样本全被误杀，永久不收敛；
 2. **连续超限回退**：连续 `TIMING_OVERRUN_RESET` 次异常 → 丢掉该 key 的内存窗口、
    强制回到 warm-up（盲等 0，按调用方给的探测频率截图重新攒样本），
    并用更保守的 `TIMING_RESET_SAFETY` 重新收敛；
@@ -345,16 +347,23 @@ class CycleTimer:
         median = _percentile(data, 0.5)
         if median <= 0:
             return data
-        limit = median * settings.TIMING_OUTLIER_FACTOR
+        limit = _outlier_limit(median)
         kept = [value for value in data if value <= limit]
         # 全部被判异常时退回原样，避免 usable 为空导致永远不收敛
         return kept or data
 
     def _is_outlier(self, history: Estimate, value: float) -> bool:
-        """新样本相对历史是否算异常（历史不足时一律不算）。"""
-        if history.usable <= 0 or not history.p50:
+        """新样本相对历史是否算异常。
+
+        **没有基线就不判异常**：可用样本少于 TIMING_WARMUP_SAMPLES 时一律放行。
+        否则一个偶然很小的样本（例如「点完结算瞬间就回到挑战界面」的 0.04 秒）
+        会把判据阈值压到几乎为 0，之后每一个真实样本都被判成异常剔除，
+        窗口里只剩那个极小值 -> usable 永远到不了 warm-up 门槛 -> **永久不收敛**，
+        这正是本模块要防的失效模式的另一半（前一半是样本过大顶高盲等）。
+        """
+        if history.usable < settings.TIMING_WARMUP_SAMPLES or not history.p50:
             return False
-        return value > history.p50 * settings.TIMING_OUTLIER_FACTOR
+        return value > _outlier_limit(history.p50)
 
     def _window(self, key: str) -> List[float]:
         """key 的内存样本窗口；首次访问从 DB 载入最近 window 条。"""
@@ -460,6 +469,18 @@ class CycleTimer:
 # --------------------------------------------------------------------------- #
 # 工具函数
 # --------------------------------------------------------------------------- #
+def _outlier_limit(median: float) -> float:
+    """异常判据阈值 = max(相对倍数, 绝对下限)。
+
+    只用相对倍数（p50 × TIMING_OUTLIER_FACTOR）在 p50 很小时会退化：
+    p50=0.04 秒时阈值只有 0.1 秒，任何真实耗时都会被判成异常。
+    加一个绝对下限后，短耗时阶段的正常波动不会被误杀；
+    对 p50 较大的阶段（战斗几十秒）相对倍数仍然占主导，判据不变严。
+    """
+    return max(median * settings.TIMING_OUTLIER_FACTOR,
+               median + settings.TIMING_OUTLIER_FLOOR)
+
+
 def _percentile(values: Sequence[float], q: float) -> Optional[float]:
     """线性插值分位数；空序列返回 None。"""
     data = sorted(values)

@@ -219,10 +219,14 @@ HOME = State(
 1. 可用样本 < `TIMING_WARMUP_SAMPLES`(5) → `blind_wait=0` + 调用方给的 interval，**等于改造前的行为**；
 2. 收敛后 → `blind_wait = p10 × TIMING_SAFETY(0.85) − 一次识图成本`，之后按 `TIMING_FINE_INTERVAL`(1s) 细轮询；
 3. 硬上限 `min(TIMING_MAX_BLIND_WAIT(90s), timeout − TIMING_FINE_WINDOW(10s))`，估计再离谱也不会长时间瞎等；
-4. **防不收敛**：`> p50 × TIMING_OUTLIER_FACTOR(2.5)` 的样本判为异常，不计入 min/p10（仍入库审计）；
-   连续 `TIMING_OVERRUN_RESET`(2) 次异常就丢掉内存窗口、回到 warm-up 用探测频率重新攒样本，
-   并用更保守的 `TIMING_RESET_SAFETY`(0.5) 重新收敛。
-   所以「等太久 → 样本更大 → 盲等更久 → 最小值永远下不来」这个死循环跑不起来。
+4. **防不收敛（两个方向都要防）**：异常阈值 = `max(p50 × TIMING_OUTLIER_FACTOR(2.5), p50 + TIMING_OUTLIER_FLOOR(30s))`，
+   超过的样本不计入 min/p10（仍入库审计）；连续 `TIMING_OVERRUN_RESET`(2) 次异常就丢掉内存窗口、
+   回到 warm-up 用探测频率重新攒样本，并用更保守的 `TIMING_RESET_SAFETY`(0.5) 重新收敛。
+   - *样本过大*：「等太久 → 样本更大 → 盲等更久 → 最小值永远下不来」这个死循环跑不起来；
+   - *样本过小*：**可用样本不足 `TIMING_WARMUP_SAMPLES` 时一律不判异常**（没有基线就谈不上异常），
+     且阈值带绝对下限 —— 否则一个偶然很小的样本（实测踩到：`soul:challenge` 点完结算瞬间返回，
+     只有 0.045 秒）会把阈值压到 0.11 秒，之后每个真实样本都被误判成异常剔除，
+     窗口里只剩那个极小值，`usable` 永远攒不够 → **永久不收敛**，还会每轮刷误导性 WARNING。
 
 ---
 
