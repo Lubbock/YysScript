@@ -19,7 +19,8 @@ from core.errors import StateTimeoutError
 from core.logger import get_logger
 from states.base import State, as_coerce
 
-if TYPE_CHECKING:  # 仅类型标注：避免 states 层在运行时依赖 cv2 / pyautogui
+if TYPE_CHECKING:  # 仅类型标注：避免 states 层在运行时依赖 cv2 / pyautogui / storage
+    from core.timing import WaitScheduler
     from vision.types import Match
 
 log = get_logger(__name__)
@@ -42,6 +43,48 @@ class Detection:
     @property
     def key(self) -> str:
         return self.state.key
+
+
+class _Pacer:
+    """等待节奏：可选的一次性盲等 + 之后的轮询间隔。
+
+    为什么要有它：以前 wait_* 一律「识图 -> sleep(interval) -> 识图」，
+    等一场 45 秒的战斗要截十几次屏，而其中绝大多数注定什么都识别不到。
+    给了 scheduler（core/timing.py 的 CycleTimer）之后，先按历史耗时无截图
+    盲等一段，再用更细的间隔轮询，既省截图又不会漏掉状态跳变。
+
+    不给 scheduler 时 blind=0、interval 就是调用方传进来的值，
+    `next_sleep()` 每次返回同一个 interval —— 与改造前的行为逐字一致。
+    """
+
+    __slots__ = ("blind", "interval", "_pending")
+
+    def __init__(self, blind: float, interval: float) -> None:
+        self.blind = blind
+        self.interval = interval
+        #: 还没用掉的盲等额度（只用一次，之后按 interval 轮询）
+        self._pending = blind
+
+    @classmethod
+    def plan(cls, scheduler: Optional["WaitScheduler"], key: str,
+             timeout: float, interval: float) -> "_Pacer":
+        """问 scheduler 要计划；scheduler 为 None 时退回固定间隔。"""
+        if scheduler is None:
+            return cls(0.0, interval)
+        plan = scheduler.plan(key, timeout=timeout, interval=interval)
+        blind = min(max(0.0, float(plan.blind_wait)), max(0.0, timeout))
+        if blind > 0:
+            log.info("等待 %s：先盲等 %.1f 秒（不截屏），再以 %.1f 秒间隔轮询｜%s",
+                     key, blind, plan.interval, plan.reason)
+        return cls(blind, plan.interval or interval)
+
+    def next_sleep(self, remaining: float) -> float:
+        """下一次该睡多久。第一次先把盲等额度用掉，之后固定 interval。"""
+        if self._pending > 0:
+            pause = min(self._pending, max(0.0, remaining))
+            self._pending = 0.0
+            return pause
+        return self.interval
 
 
 class StateMachine:
@@ -111,14 +154,21 @@ class StateMachine:
         interval: Optional[float] = None,
         on_wait: Optional[WaitHook] = None,
         raise_on_timeout: bool = False,
+        scheduler: Optional["WaitScheduler"] = None,
+        timing_key: Optional[str] = None,
     ) -> bool:
         """轮询直到 state 出现。
 
         返回 True 表示等到了；超时返回 False，raise_on_timeout=True 时改抛异常。
+
+        scheduler / timing_key（可选）：给了就先按历史耗时「盲等」一段时间
+        （这期间不截屏），再用更细的间隔轮询，见 core/timing.py。
+        不给时行为与以前完全一致：第一次识别不命中后就按 interval 轮询。
         """
         state = as_coerce(state)
         timeout = settings.DEFAULT_WAIT_TIMEOUT if timeout is None else timeout
         interval = settings.DEFAULT_WAIT_INTERVAL if interval is None else interval
+        pacer = _Pacer.plan(scheduler, timing_key or state.key, timeout, interval)
 
         waited = 0.0
         rounds = 0
@@ -132,8 +182,9 @@ class StateMachine:
                 on_wait(rounds)
             if waited >= timeout:
                 break
-            time.sleep(interval)
-            waited += interval
+            pause = pacer.next_sleep(timeout - waited)
+            time.sleep(pause)
+            waited += pause
 
         log.error("等待状态 %s 超时（%.1f 秒）", state, timeout)
         if raise_on_timeout:
@@ -147,11 +198,17 @@ class StateMachine:
         interval: Optional[float] = None,
         on_wait: Optional[WaitHook] = None,
         raise_on_timeout: bool = False,
+        scheduler: Optional["WaitScheduler"] = None,
+        timing_key: Optional[str] = None,
     ) -> bool:
-        """轮询直到 state 消失（例如战斗中的「准备」按钮不再出现）。"""
+        """轮询直到 state 消失（例如战斗中的「准备」按钮不再出现）。
+
+        scheduler / timing_key 的含义同 wait_for。
+        """
         state = as_coerce(state)
         timeout = settings.DEFAULT_WAIT_TIMEOUT if timeout is None else timeout
         interval = settings.DEFAULT_WAIT_INTERVAL if interval is None else interval
+        pacer = _Pacer.plan(scheduler, timing_key or state.key, timeout, interval)
 
         waited = 0.0
         rounds = 0
@@ -165,8 +222,9 @@ class StateMachine:
                 on_wait(rounds)
             if waited >= timeout:
                 break
-            time.sleep(interval)
-            waited += interval
+            pause = pacer.next_sleep(timeout - waited)
+            time.sleep(pause)
+            waited += pause
 
         log.error("状态 %s 未消失，超时 %.1f 秒", state, timeout)
         if raise_on_timeout:
@@ -179,11 +237,18 @@ class StateMachine:
         timeout: Optional[float] = None,
         interval: Optional[float] = None,
         on_wait: Optional[WaitHook] = None,
+        scheduler: Optional["WaitScheduler"] = None,
+        timing_key: Optional[str] = None,
     ) -> Optional[Detection]:
-        """等待候选状态中任意一个出现，返回命中结果；超时返回 None。"""
+        """等待候选状态中任意一个出现，返回命中结果；超时返回 None。
+
+        scheduler / timing_key 的含义同 wait_for；timing_key 缺省用第一个候选的 key。
+        """
         candidates = [as_coerce(c) for c in candidates]
         timeout = settings.DEFAULT_WAIT_TIMEOUT if timeout is None else timeout
         interval = settings.DEFAULT_WAIT_INTERVAL if interval is None else interval
+        default_key = candidates[0].key if candidates else "wait"
+        pacer = _Pacer.plan(scheduler, timing_key or default_key, timeout, interval)
 
         waited = 0.0
         rounds = 0
@@ -199,8 +264,9 @@ class StateMachine:
                 log.error("等待任意状态 %s 超时（%.1f 秒）",
                           [c.key for c in candidates], timeout)
                 return None
-            time.sleep(interval)
-            waited += interval
+            pause = pacer.next_sleep(timeout - waited)
+            time.sleep(pause)
+            waited += pause
 
     def expect(
         self,
@@ -208,7 +274,10 @@ class StateMachine:
         timeout: Optional[float] = None,
         interval: Optional[float] = None,
         on_wait: Optional[WaitHook] = None,
+        scheduler: Optional["WaitScheduler"] = None,
+        timing_key: Optional[str] = None,
     ) -> bool:
         """wait_for 的严格版：等不到直接抛 StateTimeoutError。"""
         return self.wait_for(state, timeout=timeout, interval=interval,
-                             on_wait=on_wait, raise_on_timeout=True)
+                             on_wait=on_wait, raise_on_timeout=True,
+                             scheduler=scheduler, timing_key=timing_key)

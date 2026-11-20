@@ -2,6 +2,10 @@
 
 对应旧 scripts/a_base.py 里的 StopWatch / WaitPredication：
 把每个动作实际耗时记到 storage，下次用历史均值代替拍脑袋的 time.sleep。
+
+⚠️ 新的流程请优先用 `core/timing.py` 的 `CycleTimer`：它除了记耗时，还会给出
+「先盲等多久、之后隔多久识图」的等待计划，并处理异常样本导致的不收敛问题。
+本模块保留给 `event-aj8fer`（历史样本 key `Aj8fer-1` 语义不变，老数据可继续用）。
 """
 from __future__ import annotations
 

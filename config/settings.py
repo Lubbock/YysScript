@@ -105,6 +105,42 @@ EXPLORE_LOST_LIMIT: int = 2
 #: 体力耗尽时的退出码（沿用旧脚本约定）
 EXIT_CODE_ABORT: int = 300
 
+# --------------------------------------------------------------------------- #
+# 循环计时 / 自适应等待（core/timing.py）
+# --------------------------------------------------------------------------- #
+#: 总开关。关掉后 CycleTimer.plan() 永远返回「不盲等 + 调用方给的间隔」，
+#: 也就是改造前的行为。环境变量 YYS_ADAPTIVE_WAIT=0 可临时关闭，
+#: 命令行 --no-adaptive-wait 与之等价。
+ADAPTIVE_WAIT: bool = os.environ.get("YYS_ADAPTIVE_WAIT", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+
+#: 参与统计的最近样本数（滑动窗口）
+TIMING_WINDOW: int = 20
+#: 攒够多少个「可用样本」才算收敛、可以开始盲等；不足时行为与改造前完全一致
+TIMING_WARMUP_SAMPLES: int = 5
+#: 异常值判据：样本 > p50 * 该倍数就不计入 min / p10（仍然入库供审计）
+TIMING_OUTLIER_FACTOR: float = 2.5
+#: 连续多少次异常样本就丢掉历史窗口、回到探测频率重新收敛。
+#: 这是「等太久导致最小值永远收敛不下来」的兜底。
+TIMING_OVERRUN_RESET: int = 2
+#: 盲等时长 = p10 * 安全系数 - 一次识图成本。小于 1 表示宁可早点开始轮询，
+#: 也不要在界面已经变了的时候还在瞎等。
+TIMING_SAFETY: float = 0.85
+#: 触发过回退后临时使用的安全系数（更保守），攒够下面这么多样本后恢复
+TIMING_RESET_SAFETY: float = 0.5
+TIMING_RESET_RECOVER_SAMPLES: int = 10
+#: 盲等硬上限（秒）：估计再离谱也不会长时间瞎等
+TIMING_MAX_BLIND_WAIT: float = 90.0
+#: 收敛后轮询识图的间隔（秒）。比 DEFAULT_WAIT_INTERVAL 更细，命中更及时，
+#: 因为大头已经由盲等省掉了。
+TIMING_FINE_INTERVAL: float = 1.0
+#: 盲等最多吃掉 timeout 减去这个值，剩下的留给细粒度轮询
+TIMING_FINE_WINDOW: float = 10.0
+#: 「一次截屏 + 模板匹配」成本的滑动窗口长度（只在内存，不入库）
+TIMING_PROBE_WINDOW: int = 10
+#: 流程引擎连续多少次什么都没识别到，就广播一次 state.unknown
+UNKNOWN_POLL_LIMIT: int = 5
+
 
 # --------------------------------------------------------------------------- #
 # 拟人化操作
