@@ -108,7 +108,7 @@ HOME = State(
 ### `actions/` — 操作（职责 3，解决"坐标写死"的关键层）
 - `window.py`：`GameWindow` + `Win32WindowFinder`（按标题/类名找窗口，取**客户区**矩形，声明 DPI 感知）+ `MacWindowFinder`（macOS 按进程名定位窗口，默认「iPhone Mirroring」iOS 镜像窗口，窗口内点击透传到手机）+ `FullScreenFinder`（找不到窗口或其它平台时把整屏当客户区）。找不到窗口时按 `settings.FALLBACK_TO_FULLSCREEN` 决定回退还是抛 `WindowNotFoundError`。
 - `viewport.py`：`Viewport`，纯计算。`to_screen(Point)` 逻辑坐标 → 屏幕坐标（按窗口位置平移 + 按窗口尺寸缩放 + 校准偏移 + 越界裁剪），`to_logical(screen)` 反向。**这一层让换分辨率、窗口不在原点都不再致命。**
-- `mouse.py`：`HumanMouse`，只认屏幕坐标。落点随机抖动、动作间随机停顿（对应旧 `personal_pause`）、拖动分步 + 缓动。macOS 上 controller 注入目标进程 PID 后启用「礼貌点击」：点击瞬间激活目标窗口并在坐标上会话级点击，随即还原用户光标与焦点，轮询识别期间完全不碰鼠标。
+- `mouse.py`：`HumanMouse`，只认屏幕坐标。落点随机抖动、动作间随机停顿（对应旧 `personal_pause`）、拖动分步 + 缓动。macOS 上 controller 注入目标进程 PID 后启用「礼貌点击」：点击瞬间激活目标窗口 -> 把光标 warp 到目标点**并补发一个 mouseMoved** -> 在同一坐标发 down/up -> 还原光标（同样补发 mouseMoved）与焦点，轮询识别期间完全不碰鼠标。坑：`CGWarpMouseCursorPosition` 只改窗口服务的指针坐标、不产生移动事件，App 侧缓存的光标位置（hover / Mac Catalyst 的指针→触摸桥接）不更新，只按坐标发事件会被静默丢掉，表现为「跑一段时间后点不动，手动晃一下鼠标才恢复」，所以 warp 必须配套补发 `kCGEventMouseMoved`；滚动事件本身不带坐标，也要先落点。
 - `controller.py`：`GameController` 门面，flows 唯一入口。`resolve()` 统一处理三种点击目标：
   - `Point` → 逻辑坐标，按窗口换算；
   - `Match` / `Box` → vision 的识别结果，取中心点（已是屏幕坐标）；
@@ -245,3 +245,4 @@ python -m pytest tests -q
 3. **等待时间仍有经验值**：战斗时长按固定秒数等待（各 Flow 的 `BATTLE_*` 常量），只有 `event-aj8fer` 用了历史耗时预测。
 4. **无端到端测试**：涉及真实截图与点击的路径只能人工验证。
 5. `tools/` 下的归档工具未做质量修复（部分依赖 TensorFlow 1.x、PyAudio、pywin32）。
+6. **macOS 长时间挂机限制**：显示器休眠或手机锁屏时，合成点击根本送不到目标窗口。脚本会在检测到「主显示器休眠」时告警一次（`_warn_if_display_asleep`），但修不了它 —— 挂机跑之前要么关掉系统自动休眠，要么 `caffeinate -di python main.py ...`。

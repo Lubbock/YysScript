@@ -12,9 +12,16 @@ macOS「礼貌点击」模式（controller 注入 pid_provider 后启用）：
 镜像 / 游戏窗口只在自己是活跃 App 时才响应点击，而用户还要继续用电脑，
 所以每次点击只做三件事，把干扰压到点击瞬间：
 1. 记下用户光标位置与当前前台 App；
-2. 用 System Events 短暂激活目标窗口 -> 在坐标上会话级点击（不做光标移动动画）；
-3. 立刻把光标 warp 回原位，并把焦点还给用户原来的 App。
+2. 用 System Events 短暂激活目标窗口 -> 把光标 warp 到目标点并**补发一个
+   mouseMoved** -> 在同一个坐标发 down/up（不做光标移动动画）；
+3. 立刻把光标 warp 回原位（同样补发 mouseMoved），并把焦点还给用户原来的 App。
 轮询识别期间完全不碰鼠标与焦点。
+
+为什么必须补发 mouseMoved（实测踩出来的坑）：
+`CGWarpMouseCursorPosition` 只改窗口服务里的指针坐标，**不产生鼠标移动事件**。
+目标 App 自己缓存的光标位置（hover 状态、Mac Catalyst 的指针->触摸桥接）不会跟着
+更新，系统也要等下一次真实硬件移动才刷新。只 warp / 只按坐标发事件时，合成点击会
+被静默丢掉，表现就是「跑一段时间后点不动，用户手动晃一下鼠标又恢复」。
 
 两个实测结论（别再踩）：
 - 命令行 Python 进程里 `NSRunningApplication.activateWithOptions_` 与
@@ -25,6 +32,7 @@ macOS「礼貌点击」模式（controller 注入 pid_provider 后启用）：
 """
 from __future__ import annotations
 
+import logging
 import random
 import sys
 import time
@@ -41,6 +49,12 @@ ScreenPoint = Tuple[int, int]
 
 pyautogui.FAILSAFE = settings.PYAUTOGUI_FAILSAFE
 pyautogui.PAUSE = settings.PYAUTOGUI_PAUSE
+
+# ------------------------------------------------------------------ 礼貌点击节奏
+# down/up 之间按住多久（太短部分 App 会当成 hover）
+_CLICK_HOLD: float = 0.06
+# 光标落到目标点后、发点击前的稳定时间，让 App 先收到 mouseMoved
+_MOVE_SETTLE: float = 0.02
 
 
 def _tween(name: str):
@@ -116,22 +130,27 @@ class HumanMouse:
     ) -> ScreenPoint:
         """移动到目标并点击，返回实际点击的屏幕坐标。
 
-        礼貌点击模式下不播放光标移动动画：激活目标窗口后在坐标上直接点击，
-        随即还原用户光标与焦点。
+        礼貌点击模式下不播放光标移动动画：激活目标窗口、把光标 warp 到目标点
+        （并补发 mouseMoved）后直接点击，随即还原用户光标与焦点。
         """
         target = self._jitter(point)
         pid = self._target_pid()
         if pid is not None:
-            log.info("礼貌点击: 目标 pid=%s 坐标=%s 点击前前台=%s",
-                     pid, target, _frontmost_pid())
+            # 每次 _frontmost_pid() 都要起一个 osascript（约 0.4 秒），只在 debug 时才查
+            trace = log.isEnabledFor(logging.DEBUG)
+            log.info("礼貌点击: 目标 pid=%s 坐标=%s", pid, target)
+            if trace:
+                log.debug("礼貌点击: 点击前前台=%s", _frontmost_pid())
             with _polite_session(pid) as session:
-                log.info("礼貌点击: 激活后前台=%s activated=%s",
-                         _frontmost_pid(), session.activated)
+                if trace:
+                    log.debug("礼貌点击: 激活后前台=%s activated=%s",
+                              _frontmost_pid(), session.activated)
                 for index in range(max(1, clicks)):
                     _session_click(target)
                     if index + 1 < clicks:
                         time.sleep(interval)
-            log.info("礼貌点击: 归还后前台=%s", _frontmost_pid())
+            if trace:
+                log.debug("礼貌点击: 归还后前台=%s", _frontmost_pid())
             self.sleep_human()
             return target
         pyautogui.moveTo(target[0], target[1], duration=move_duration,
@@ -184,10 +203,11 @@ class HumanMouse:
 
     def scroll(self, clicks: int, point: Optional[ScreenPoint] = None, pause: float = 0.5) -> None:
         """在指定位置滚动滚轮。"""
+        target_point = None if point is None else self._jitter(point)
         pid = self._target_pid()
         if pid is not None:
             with _polite_session(pid):
-                _session_scroll(clicks)
+                _session_scroll(clicks, target_point)
             time.sleep(pause)
             return
         if point is not None:
@@ -255,14 +275,15 @@ class _polite_session:
                         "osascript: {} ".format(self._activate_err) if self._activate_err else "",
                     )
                 )
+        # 显示器休眠时点击根本送不到目标窗口，先给一次明确提示（只在状态跳变时记日志）
+        _warn_if_display_asleep()
         return self
 
     def __exit__(self, *exc_info) -> None:
-        import Quartz
-
         if self.old_xy is not None:
-            Quartz.CGWarpMouseCursorPosition(self.old_xy)
-            Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+            # warp 回原位也必须补发 mouseMoved：否则目标 App 仍以为光标停在点击点，
+            # 要等用户真的动一次鼠标才刷新（「不动鼠标就点不动」的另一半原因）
+            _warp_to(self.old_xy, settle=0.0)
         if self.activated and self.prev_pid is not None:
             # 用户在这期间自己切了别的应用就不打扰，只在我们抢来的焦点还在时归还
             if _frontmost_pid() == self.pid:
@@ -314,16 +335,79 @@ def _wait_frontmost(pid: int, timeout: float = 1.5) -> bool:
     return False
 
 
+# --------------------------------------------------------------------------- #
+# 指针同步：warp + 补发 mouseMoved（礼貌点击的地基）
+# --------------------------------------------------------------------------- #
+def _warp_to(point: ScreenPoint, settle: float = _MOVE_SETTLE) -> None:
+    """把光标放到 point，并补发一个同坐标的 mouseMoved。
+
+    只用 `CGWarpMouseCursorPosition` 有两个坑：
+    1. 它**不产生鼠标移动事件**，目标 App 缓存的光标位置（hover 状态、
+       Mac Catalyst 的指针->触摸桥接）仍是旧值，随后按坐标发的 down/up
+       会被丢掉，要等用户真的动一次鼠标才恢复；
+    2. 它不重置硬件累计位移，下一次真实移动会把光标拽回旧基准 + delta，
+       所以 warp 前后各切一次 associate，点完再补发事件。
+    """
+    import Quartz
+
+    x, y = float(point[0]), float(point[1])
+    Quartz.CGAssociateMouseAndMouseCursorPosition(False)
+    Quartz.CGWarpMouseCursorPosition((x, y))
+    moved = Quartz.CGEventCreateMouseEvent(
+        None, Quartz.kCGEventMouseMoved, (x, y), Quartz.kCGMouseButtonLeft)
+    Quartz.CGEventPost(Quartz.kCGSessionEventTap, moved)
+    Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+    if settle:
+        time.sleep(settle)
+
+
+def _cursor_position() -> ScreenPoint:
+    """当前系统光标位置（屏幕绝对坐标），仅供 debug 核对指针是否真的落到位。"""
+    import Quartz
+
+    loc = Quartz.CGEventGetLocation(Quartz.CGEventCreate(None))
+    return int(loc.x), int(loc.y)
+
+
+def _main_display_asleep() -> bool:
+    """主显示器是否已休眠。休眠时合成事件落进睡着的窗口服务器，手机不会有任何
+    反应，表现同样是「不动鼠标就不生效」，但这一条脚本修不了，只能提示用户。
+    """
+    try:
+        import Quartz
+
+        return bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID()))
+    except Exception:
+        return False
+
+
+_asleep_logged: Optional[bool] = None
+
+
+def _warn_if_display_asleep() -> None:
+    """只在状态跳变时告警一次，避免每次点击都刷日志。"""
+    global _asleep_logged
+    asleep = _main_display_asleep()
+    if asleep != _asleep_logged:
+        _asleep_logged = asleep
+        if asleep:
+            log.warning("主显示器处于休眠状态，此时的点击不会送达目标窗口；"
+                        "动一下鼠标唤醒屏幕，或设置里关闭显示器自动休眠")
+
+
 def _session_click(point: ScreenPoint) -> None:
     import Quartz
 
+    _warp_to(point)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("礼貌点击: 指针落点 %s，系统光标实际 %s", point, _cursor_position())
     x, y = float(point[0]), float(point[1])
     down = Quartz.CGEventCreateMouseEvent(
         None, Quartz.kCGEventLeftMouseDown, (x, y), Quartz.kCGMouseButtonLeft)
     up = Quartz.CGEventCreateMouseEvent(
         None, Quartz.kCGEventLeftMouseUp, (x, y), Quartz.kCGMouseButtonLeft)
     Quartz.CGEventPost(Quartz.kCGSessionEventTap, down)
-    time.sleep(0.06)
+    time.sleep(_CLICK_HOLD)
     Quartz.CGEventPost(Quartz.kCGSessionEventTap, up)
 
 
@@ -337,17 +421,18 @@ def _session_drag(
 
     sx, sy = float(start[0]), float(start[1])
     ex, ey = float(end[0]), float(end[1])
+    _warp_to(start)
     down = Quartz.CGEventCreateMouseEvent(
         None, Quartz.kCGEventLeftMouseDown, (sx, sy), Quartz.kCGMouseButtonLeft)
     Quartz.CGEventPost(Quartz.kCGSessionEventTap, down)
     step_duration = max(duration / steps, 0.01)
     for i in range(1, steps + 1):
         ratio = i / steps
+        pos = (sx + (ex - sx) * ratio, sy + (ey - sy) * ratio)
+        # 每一步都让指针跟到位，否则 App 侧的拖拽轨迹仍停在起点
+        _warp_to(pos, settle=0.0)
         moved = Quartz.CGEventCreateMouseEvent(
-            None, Quartz.kCGEventLeftMouseDragged,
-            (sx + (ex - sx) * ratio, sy + (ey - sy) * ratio),
-            Quartz.kCGMouseButtonLeft,
-        )
+            None, Quartz.kCGEventLeftMouseDragged, pos, Quartz.kCGMouseButtonLeft)
         Quartz.CGEventPost(Quartz.kCGSessionEventTap, moved)
         time.sleep(step_duration)
     up = Quartz.CGEventCreateMouseEvent(
@@ -355,9 +440,12 @@ def _session_drag(
     Quartz.CGEventPost(Quartz.kCGSessionEventTap, up)
 
 
-def _session_scroll(clicks: int) -> None:
+def _session_scroll(clicks: int, point: Optional[ScreenPoint] = None) -> None:
+    """滚动事件本身不带坐标，系统按当前光标位置决定「滚谁」，所以要先落点。"""
     import Quartz
 
+    if point is not None:
+        _warp_to(point)
     event = Quartz.CGEventCreateScrollWheelEvent(
         None, Quartz.kCGScrollEventUnitLine, 1, int(clicks))
     Quartz.CGEventPost(Quartz.kCGSessionEventTap, event)
