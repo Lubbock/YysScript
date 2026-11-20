@@ -25,16 +25,17 @@
 | 目录 | 职责（一句话） | 允许依赖 | 禁止 |
 |---|---|---|---|
 | `config/` | 全局参数 + **唯一**的坐标表 | 无（纯配置） | 依赖任何业务层 |
-| `core/` | 日志、异常、计时/耗时预测 | `config`、`storage` | 依赖 vision/states/actions/flows |
+| `core/` | 日志、异常、计时/耗时预测、**事件总线**、**自适应等待** | `config`、`storage` | 依赖 vision/states/actions/flows |
 | `vision/` | **图像识别**：截屏、模板匹配、颜色轮廓检测 | `config`、`core` | 点击、坐标换算、业务判断 |
 | `storage/` | **存储**：sqlite 持久化（动作耗时样本等） | `config`、`core` | 依赖 vision/states/actions/flows |
 | `states/` | **状态机**：一个状态一个文件，全部定义成常量 | `config`、`core`、`vision.types` | 点击操作、业务流程 |
 | `actions/` | **操作**：找游戏窗口、坐标换算、拟人化点击 | `config`、`core`、`vision` | 业务流程判断 |
-| `flows/` | **功能编排**：一个大功能一个子文件夹 | 以上全部 | 被下层反向依赖 |
+| `flows/` | **功能编排**：一个大功能一个子文件夹；含事件驱动的主流程引擎与订阅方 | 以上全部 | 被下层反向依赖 |
 | `assets/` | 模板图片资源（`assets/templates/*.png`） | — | 放代码 |
 | `tests/` | 单元测试（不依赖游戏、不依赖 cv2/pyautogui） | 被测模块 | 真实截屏/点击 |
 | `tools/` | 维护工具（模板图片管理 Web 界面）+ 周边归档（语音、远控、Flask demo、安卓实验等） | 可 import 主包 | 被主流程 import |
 | `var/` | 运行时产物（日志、sqlite 数据库），不进版本库 | — | 手写文件 |
+| `.worktrees/` | git worktree 隔离开发区（不入版本库）：改大功能时不影响正在运行的主工作区 | — | 在主工作区里直接改它 |
 | `main.py` | 命令行入口 | `flows`、`actions`、`core`、`config` | 写业务逻辑 |
 
 ### 依赖方向（只能从上往下）
@@ -46,7 +47,7 @@ main.py
         ├── actions/  点哪里、怎么点（窗口 + 坐标换算 + 拟人化）
         │     └── vision/   屏幕上有什么、在哪里
         ├── storage/  历史耗时样本
-        ├── core/     日志 / 异常 / 计时
+        ├── core/     日志 / 异常 / 计时 / 事件总线
         └── config/   参数与坐标表
 ```
 
@@ -70,6 +71,12 @@ main.py
 - `logger.py`：`get_logger(name)`，全局只配置一次 handler（修掉旧代码重复 addHandler 导致的日志重复）。日志落 `var/logs/yys_script.log`，按 5MB 轮转。
 - `errors.py`：`YysError` 及子类 `ConfigError` / `WindowNotFoundError` / `StateTimeoutError` / `StaminaExhaustedError` / `FlowAbortedError`。**不要再用 `exit(300)`**，抛异常，由 `main.py` 转退出码。
 - `stopwatch.py`：`Stopwatch` 计时、`WaitPredictor` 用历史均值预测等待时长。
+- `bus.py`：`EventBus` —— 进程内**同步**发布/订阅。topic 点分层级，订阅支持 `*`（一段）/ `**`（多段）通配符；
+  priority、once、异常隔离（默认吞掉订阅方异常只记日志，`strict=True` 时抛出）、递归深度保护、history 环形缓冲。
+  纯标准库实现，不认识任何领域事件，领域 topic 定义在 `flows/signals.py`。
+- `timing.py`：`CycleTimer`（实现 `WaitScheduler` 协议）+ `FixedScheduler` + `Estimate` / `WaitPlan` /
+  `TimingSample` / `Cycle`。记录每轮 / 每阶段耗时（写 `storage.DurationStore`），并给出「先盲等多久、
+  之后隔多久识图」的计划；内置异常值剔除与「连续超限回退重新收敛」。算法细节见本节末尾。
 
 ### `vision/` — 图像识别（职责 1）
 - `types.py`：`Frame`（截图 + 原点 + 尺寸）、`Box`、`Match`。**这里所有坐标都是屏幕绝对坐标。**
@@ -85,6 +92,8 @@ main.py
 ### `states/` — 状态机（职责 2 的主体）
 - `base.py`：`State`（frozen dataclass）、`StateKind`、全局 `REGISTRY`、`get_state()` / `all_states()`。
 - `machine.py`：`StateMachine` —— `is_active` / `locate` / `locate_all` / `detect`（取最高分） / `detect_first`（按优先级） / `wait_for` / `wait_gone` / `wait_any` / `expect`（超时抛异常）。
+  `wait_*` 都接受可选的 `scheduler` + `timing_key`：给了就先按历史耗时盲等、再细粒度轮询（内部 `_Pacer`）；
+  **不给时行为与改造前逐字一致**，所以命令式流程可以逐个 opt-in。
 - **其余每个文件 = 一个状态**，文件名 = 状态 key 的小写形式，文件内只有一个大写常量：
 
 ```python
@@ -128,10 +137,18 @@ HOME = State(
 | `shard/` | `shard` | —（新增：式神碎片挑战循环，模板匹配驱动，支持 iOS 镜像） |
 | `events/` | `event-aband3t` / `event-aj8fer` | `scripts/abnd3t.py`、`scripts/aj8fer.py` |
 
-- `base.py`：`Flow` 基类（`click` / `drag` / `scroll` / `is_active` / `locate` / `wait` / `expect` / `wait_gone` / `wait_any` / `click_state` / `prepare` / `run` / `execute`）与 `RetryGuard`。
+- `base.py`：`Flow` 基类（`click` / `drag` / `scroll` / `is_active` / `locate` / `wait` / `expect` / `wait_gone` / `wait_any` / `click_state` / `on` / `publish` / `cycle` / `wait_plan` / `create_engine` / `prepare` / `run` / `execute`）与 `RetryGuard`。
+  每个 Flow 自带一条私有 `bus`（`core/bus.py`）和一个 `timer`（`core/timing.py`）；
+  `wait*` 系列多了可选的 `adaptive_key`，给了就按历史耗时盲等。
 - `registry.py`：命令行名 → Flow 类的惰性映射，`main.py` 靠它加载。
 - `explore/` 额外拆了 `map_navigator.py`（翻页、选章节）与 `dog_food.py`（满级式神替换）。
 - 新增功能：建子目录 → 写 `XxxFlow(Flow)` 实现 `run()` → 在 `registry.py` 的 `FLOW_SPECS` 注册 → 需要新界面就在 `states/` 加状态文件、需要新坐标就在 `config/coordinates.py` 加常量。
+- `engine.py`：**主流程引擎**（事件驱动的推进器）：`watch` / `step` / `observe` / `peek` / `wait_for` /
+  `begin_wait` / `click` / `finish_round` / `stop` / `fail` / `run_rounds` / `summary`，本身不含玩法知识。
+- `signals.py`：topic 常量 + 事件对象（`FlowEvent` / `RoundEvent` / `PollEvent` / `StateEvent` /
+  `TimeoutEvent` / `ActionEvent`）+ `topic_for()`。
+- `battle_cycle.py`：`BattleCycle` —— 「挑战 → 战斗 → 结算 → 回挑战」的可复用订阅方，soul / shard 共用。
+- `soul/`、`shard/` 已迁移到事件驱动：`run()` 只负责组装引擎 + 挂 `BattleCycle` + `run_rounds()`。
 
 ### `tools/` — 维护工具与周边归档（都不参与主流程）
 
@@ -156,6 +173,56 @@ HOME = State(
 `file_server/`、`web/`（Flask demo）、`pyqt/`（GUI 骨架）、`android/`（uiautomator2 实验）、
 `ml/`（TF1 CNN demo）、`audio/`、`tomato.sh`。
 只修了指向已删除 `utils/` 的 import。**别从主流程 import 它们**（依赖方向：tools → 主包，单向）。
+
+---
+
+### 事件驱动流程与自适应等待（两条横切能力）
+
+**为什么要它**：以前 `run()` 里写死「等 A → 点 A → 等 B → 点 B」，加一条规则就得改流程本体；
+而且每一步都按固定间隔反复截屏 —— 一场 45 秒的战斗要截十几次图，绝大多数注定什么都识别不到。
+
+**四个新模块**：
+
+- `core/bus.py` —— 通用同步发布/订阅总线（只用标准库，不认识领域事件）；
+- `flows/signals.py` —— 领域词汇表：topic 常量 + frozen 事件对象 + `topic_for()`；
+- `flows/engine.py` —— `FlowEngine` 主循环，**不含任何玩法知识**：`watch()` 登记候选状态 →
+  `step()` 识图 → 广播事件 → 订阅方决定动作 → `run_rounds()` 推进轮次并计时；
+- `flows/battle_cycle.py` —— 「挑战 → 战斗 → 结算 → 回挑战」的可复用订阅方，soul / shard 共用。
+
+**topic 一览**（详见 `flows/signals.py`）：
+
+| topic | 事件对象 | 谁发 | 何时 |
+|---|---|---|---|
+| `flow.started` / `flow.finished` | `FlowEvent` | 引擎 | 整个流程首尾（`aborted` 标记是否被中止） |
+| `round.started` / `round.finished` | `RoundEvent` | 引擎 | 每轮首尾（带 duration / 本轮见过的状态 / timed_out） |
+| `round.done` | `RoundEvent` | **订阅方** | 「这一轮我处理完了」，引擎据此进入下一轮 |
+| `poll.completed` | `PollEvent` | 引擎 | 每次截屏识图之后（带本次识图耗时） |
+| `state.detected` | `StateEvent` | 引擎 | 每次命中（含同一状态重复命中） |
+| `state.entered.<KEY>` / `state.exited.<KEY>` | `StateEvent` | 引擎 | 状态**跳变**时；连续命中同一状态不重复触发 |
+| `state.unknown` | `PollEvent` | 引擎 | 连续 `UNKNOWN_POLL_LIMIT` 次什么都没识别到 |
+| `state.timeout` | `TimeoutEvent` | 引擎 | 整轮超时，或 `engine.wait_for(publish=True)` 超时 |
+| `action.performed` | `ActionEvent` | 引擎（代订阅方） | `engine.click()` 之后 |
+| `timing.recorded` | `TimingSample` | `CycleTimer` | 一条耗时样本入库时 |
+
+**订阅方控制引擎的四个入口**：`begin_wait(key, interval)`（声明在等什么，决定盲等节奏）、
+`finish_round()`（本轮结束）、`stop()`（优雅停止）、`fail(exc)`（中止并抛异常）。
+注意异常**不能**在订阅方里直接抛 —— 会被总线的异常隔离吞掉，所以交给 `fail()`，
+由引擎在本次投递结束后抛出，`main.py` 的退出码语义因此不变。
+
+**计时 key 约定** `"<flow>:<phase>"`：`soul:round`（整轮，引擎自动记）、
+`soul:battle`（点挑战到结算处理完）、`soul:challenge`（回到挑战界面的耗时）、
+`soul:probe`（一次截屏+匹配的成本，只在内存滑动平均，不入库）。
+样本表沿用 `GAMETIME_RECORD`，**老 `gray_scan.db` 直接可用**，没有 schema 变更。
+
+**自适应等待怎么算**（`CycleTimer.plan()` → `WaitPlan(blind_wait, interval)`）：
+
+1. 可用样本 < `TIMING_WARMUP_SAMPLES`(5) → `blind_wait=0` + 调用方给的 interval，**等于改造前的行为**；
+2. 收敛后 → `blind_wait = p10 × TIMING_SAFETY(0.85) − 一次识图成本`，之后按 `TIMING_FINE_INTERVAL`(1s) 细轮询；
+3. 硬上限 `min(TIMING_MAX_BLIND_WAIT(90s), timeout − TIMING_FINE_WINDOW(10s))`，估计再离谱也不会长时间瞎等；
+4. **防不收敛**：`> p50 × TIMING_OUTLIER_FACTOR(2.5)` 的样本判为异常，不计入 min/p10（仍入库审计）；
+   连续 `TIMING_OVERRUN_RESET`(2) 次异常就丢掉内存窗口、回到 warm-up 用探测频率重新攒样本，
+   并用更保守的 `TIMING_RESET_SAFETY`(0.5) 重新收敛。
+   所以「等太久 → 样本更大 → 盲等更久 → 最小值永远下不来」这个死循环跑不起来。
 
 ---
 
@@ -187,6 +254,10 @@ HOME = State(
 | 点击太快 / 太规律 | `settings.py` 的 `HUMAN_JITTER` / `HUMAN_PAUSE_RANGE` / `HUMAN_DRAG_STEPS` |
 | 日志、数据库位置 | 环境变量 `YYS_LOG_DIR` / `YYS_DB_PATH`，或 `settings.py` |
 | 等待时间太长/太短 | 各 Flow 的 `*_TIMEOUT` / `BATTLE_DURATION` 类常量 |
+| 想给某个流程加一条规则（遇到 X 就点 Y） | 新写一个订阅方 `engine.on("state.entered.X", handler)`，不用改 Flow 本体 |
+| 截图太频繁 / 空等太久 | `core/timing.py` 的估计逻辑与 `settings.py` 的 `TIMING_*`（先跑几轮攒样本，之后自动盲等） |
+| 想临时关掉自适应等待 | `--no-adaptive-wait` 或环境变量 `YYS_ADAPTIVE_WAIT=0` |
+| 想看每轮花了多少时间 | 流程结束时引擎打的「总账」日志；原始样本在 `var/gray_scan.db` 的 `GAMETIME_RECORD` |
 
 ---
 
@@ -213,6 +284,7 @@ python main.py soul --fullscreen       # 不找窗口，整屏当客户区
 python main.py soul --align-window     # 启动前把窗口挪到屏幕左上角
 python main.py soul --no-humanize      # 关闭随机抖动/停顿
 python main.py soul --debug            # DEBUG 日志 + 识别框标注图存到 var/debug/
+python main.py soul --no-adaptive-wait # 关闭自适应等待，始终按固定间隔轮询识图（= YYS_ADAPTIVE_WAIT=0）
 ```
 
 退出码：`0` 正常 / `1` 流程异常 / `2` 参数缺失 / `130` 用户中断 / `300` 体力耗尽。
@@ -232,6 +304,10 @@ python -m pytest tests -q
 - `test_state_machine.py`：用假 matcher 驱动状态机的等待/消失/多候选/超时/回调。
 - `test_duration_store.py`：sqlite 读写、均值、裁剪、SQL 注入防护。
 - `test_asset_manager_api.py`：模板管理工具的 API 契约（前端 app.js 读的每个字段）、替换/备份/回滚、裁剪、路径穿越拦截、无 pyautogui/cv2 时的降级。
+- `test_bus.py`：事件总线的投递顺序 / priority、`*` 与 `**` 通配符、`state.entered.<KEY>` 精确订阅、退订、once、异常隔离、递归深度保护、history。
+- `test_timing.py`：warm-up 退化、收敛后的盲等计算、异常值剔除、**连续超限回退并重新收敛**、盲等硬上限、discard 不入库、样本跨进程复用、窗口裁剪、识图成本滑窗。
+- `test_engine.py`：用「假游戏」同时充当 matcher 与 controller，跑通 挑战→战斗→结算→回挑战 的完整事件序列、计时入库、收敛后识图次数下降、残留结算清理、两种超时语义、stop / fail / Ctrl-C。
+- `test_state_machine_scheduler.py`：wait_* 的 `scheduler` 参数生效；**不传时 sleep 序列与改造前逐字一致**。
 
 新增状态或流程时，至少保证 `test_states_registry.py` 通过（它会检查模板文件是否存在）。
 
@@ -242,7 +318,11 @@ python -m pytest tests -q
 1. **坐标未重新标定**：`config/coordinates.py` 的数值从旧脚本原样迁移，基准按 1024×768 客户区假设。
    若你的客户端尺寸不同，`Viewport` 会等比缩放，但个别按钮仍可能需要微调；先用 `--check` 看缩放比例。
 2. **模板图片与客户端版本强绑定**：游戏更新 UI 后需要重新截图。
-3. **等待时间仍有经验值**：战斗时长按固定秒数等待（各 Flow 的 `BATTLE_*` 常量），只有 `event-aj8fer` 用了历史耗时预测。
+3. **等待时间：soul / shard 已自适应，其余仍是经验值**：走事件引擎的流程会记住每轮 / 每场战斗的耗时，
+   下次先「盲等」到接近历史 p10 再细粒度识图（`core/timing.py`，`--no-adaptive-wait` 可关）；
+   其余流程仍按固定秒数等待（各 Flow 的 `BATTLE_*` 常量），`event-aj8fer` 用 `core/stopwatch.py` 的均值预测。
 4. **无端到端测试**：涉及真实截图与点击的路径只能人工验证。
 5. `tools/` 下的归档工具未做质量修复（部分依赖 TensorFlow 1.x、PyAudio、pywin32）。
 6. **macOS 长时间挂机限制**：显示器休眠或手机锁屏时，合成点击根本送不到目标窗口。脚本会在检测到「主显示器休眠」时告警一次（`_warn_if_display_asleep`），但修不了它 —— 挂机跑之前要么关掉系统自动休眠，要么 `caffeinate -di python main.py ...`。
+7. **只有 `soul` / `shard` 迁移到事件驱动**：其余 7 个流程仍是命令式 `wait -> click` 写法。
+   引擎与订阅方是通用的（`flows/engine.py` + `flows/battle_cycle.py`），迁移其余流程属于后续工作。

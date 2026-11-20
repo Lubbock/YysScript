@@ -66,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--align-window", action="store_true",
                         help="启动前把游戏窗口挪到屏幕左上角（替代旧 scripts/e0001.py）")
     parser.add_argument("--debug", action="store_true", help="输出 DEBUG 级别日志")
+    parser.add_argument("--no-adaptive-wait", action="store_true",
+                        help="关闭自适应等待：不按历史耗时盲等，始终按固定间隔轮询识图"
+                             "（等同环境变量 YYS_ADAPTIVE_WAIT=0）")
     return parser
 
 
@@ -180,6 +183,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         import logging
 
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.no_adaptive_wait:
+        # 关掉自适应等待：所有等待都按固定间隔轮询识图（等同 YYS_ADAPTIVE_WAIT=0）。
+        # 直接改 settings，这样所有 Flow / CycleTimer 构造时都会读到，不必逐个透传参数。
+        settings.ADAPTIVE_WAIT = False
+        log.info("已关闭自适应等待（--no-adaptive-wait），按固定间隔轮询识图")
 
     if args.list:
         print_flows()

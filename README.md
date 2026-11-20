@@ -26,7 +26,8 @@ python main.py heart --times 10
 ```
 
 常用开关：`--fullscreen`（整屏当客户区）、`--align-window`（把窗口挪到左上角）、
-`--no-humanize`（关闭随机抖动）、`--exp-only`（探索只打经验怪）、`--debug`。
+`--no-humanize`（关闭随机抖动）、`--exp-only`（探索只打经验怪）、`--debug`、
+`--no-adaptive-wait`（关闭自适应等待，始终按固定间隔轮询识图）。
 
 退出码：`0` 正常 / `1` 流程异常 / `2` 参数缺失 / `130` 用户中断 / `300` 体力耗尽。
 
@@ -59,6 +60,11 @@ python main.py shard --times 10       # 自动式神碎片 10 次
    会在结算位置最多补点 4 次；
 4. 回到第 1 步循环，直到次数用完。碎片流程没有掉落界面，结算点一次即回挑战界面。
 
+> 这条循环由**事件总线**驱动：引擎识别到「挑战」/「结算」界面后发布事件，
+> `flows/battle_cycle.py` 里的订阅方决定点哪里。御魂与碎片共用同一套订阅方，只差参数。
+> 每轮耗时记进 `var/gray_scan.db`，跑满 5 轮后引擎会先盲等到接近历史 p10 再开始细粒度识图
+> （战斗中的截图次数能少一半以上），流程结束时打一份「总账」：轮数、总耗时、每轮均值、识图次数。
+
 鼠标与焦点行为（不打扰你继续用电脑）：
 
 - 截屏走 Quartz 按窗口编号抓窗口内容：窗口被遮挡、被拖动都不影响识别；
@@ -84,17 +90,22 @@ python main.py shard --times 10       # 自动式神碎片 10 次
 4. `actions` 找到游戏窗口客户区，把「基准 1024×768 逻辑坐标」按窗口实际位置和大小换算成屏幕坐标，
    再用带随机抖动与停顿的鼠标动作点击 —— 所以换分辨率、窗口不在屏幕原点也能工作；
 5. `flows` 把状态串成完整玩法流程，一个功能一个子文件夹。
+6. `flows/engine.py` 是主流程引擎：轮询识图 → 把「进入了哪个界面」发布到事件总线 →
+   订阅方决定点哪里 → 引擎推进下一轮。流程规则因此可插拔，加规则不用再改流程本体；
+7. `core/timing.py` 记住每轮 / 每场战斗的真实耗时，下次先「盲等」到接近历史 p10 再细粒度识图，
+   把空等期间的无用截图压到最低（`--no-adaptive-wait` 可关）。
 
 ## 目录结构
 
 ```
 config/     全局参数 + 唯一的坐标表（settings.py / coordinates.py）
-core/       日志、异常、计时与耗时预测
+core/       日志、异常、计时与耗时预测、事件总线 bus.py、自适应等待 timing.py
 vision/     图像识别：截屏、模板匹配、颜色轮廓检测
 storage/    sqlite 持久化（动作耗时样本，用于预测等待时间）
 states/     状态机：一个状态一个文件，全部定义成常量
 actions/    操作层：找窗口 → 坐标换算 → 拟人化点击
 flows/      功能编排：explore / soul / awake / breakthrough / seal / heart_dojo / events
+            + 主流程引擎 engine.py、事件定义 signals.py、可复用订阅方 battle_cycle.py
 assets/     模板图片（assets/templates/*.png）
 tests/      单元测试（不依赖 cv2 / pyautogui，不截屏不点击）
 tools/      维护工具（模板图片管理 Web 界面）+ 周边归档（语音、远控、Flask demo 等）
@@ -140,7 +151,8 @@ python -m pytest tests -q
 ```
 
 覆盖：坐标换算与缩放、坐标迁移一致性、状态注册表完整性（含模板文件是否存在）、
-状态机等待/超时/多候选逻辑、sqlite 存取与裁剪。
+状态机等待/超时/多候选逻辑、sqlite 存取与裁剪、事件总线（通配符 / 优先级 / 异常隔离 / 递归保护）、
+循环计时与自适应等待（含「异常样本导致不收敛」的回退自愈）、引擎驱动的完整挑战循环。
 
 ## 自定义
 
@@ -151,6 +163,8 @@ python -m pytest tests -q
 | 点击太快太规律 | `config/settings.py` 的 `HUMAN_*` 参数 |
 | 日志 / 数据库位置 | 环境变量 `YYS_LOG_DIR`、`YYS_DB_PATH`、`YYS_TEMPLATE_DIR` |
 | 加一个新玩法 | `flows/` 下新建子目录，并在 `flows/registry.py` 注册 |
+| 想给流程加一条规则（遇到某界面就点它） | 新写一个事件订阅方，参考 `flows/battle_cycle.py`（不用改 Flow 本体） |
+| 空等太久 / 截图太频繁 | `config/settings.py` 的 `TIMING_*`；跑满 5 轮后会自动按历史耗时盲等 |
 
 ## 与旧版本的差异
 
