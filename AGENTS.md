@@ -149,7 +149,12 @@ HOME = State(
 - `signals.py`：topic 常量 + 事件对象（`FlowEvent` / `RoundEvent` / `PollEvent` / `StateEvent` /
   `TimeoutEvent` / `ActionEvent`）+ `topic_for()`。
 - `battle_cycle.py`：`BattleCycle` —— 「挑战 → 战斗 → 结算 → 回挑战」的可复用订阅方，soul / shard 共用。
-- `soul/`、`shard/` 已迁移到事件驱动：`run()` 只负责组装引擎 + 挂 `BattleCycle` + `run_rounds()`。
+- `stage_cycle.py`：`StageCycle` —— 「点起始界面 → 自适应等待 → 点结算界面」的两阶段订阅方，
+  event-aband3t / event-aj8fer 共用。
+- `rules.py`：`ProbeWhileWaiting` —— 通用的「边等边点」订阅方，替代旧的 `on_wait=lambda: click(...)`。
+- **9 个流程全部已迁移到事件驱动**：`run()` 只负责组装引擎 + 挂订阅方 + `run_rounds()`。
+  流程自己的规则写成同文件里的订阅方类（`AwakeRound` / `SealRound` / `HeartRound` /
+  `BreakthroughSweep` / `ExploreSweep`），只订阅 topic、只调 engine 的公开方法，不碰 machine / controller。
 
 ### `tools/` — 维护工具与周边归档（都不参与主流程）
 
@@ -182,13 +187,18 @@ HOME = State(
 **为什么要它**：以前 `run()` 里写死「等 A → 点 A → 等 B → 点 B」，加一条规则就得改流程本体；
 而且每一步都按固定间隔反复截屏 —— 一场 45 秒的战斗要截十几次图，绝大多数注定什么都识别不到。
 
-**四个新模块**：
+**六个新模块**：
 
 - `core/bus.py` —— 通用同步发布/订阅总线（只用标准库，不认识领域事件）；
 - `flows/signals.py` —— 领域词汇表：topic 常量 + frozen 事件对象 + `topic_for()`；
 - `flows/engine.py` —— `FlowEngine` 主循环，**不含任何玩法知识**：`watch()` 登记候选状态 →
   `step()` 识图 → 广播事件 → 订阅方决定动作 → `run_rounds()` 推进轮次并计时；
-- `flows/battle_cycle.py` —— 「挑战 → 战斗 → 结算 → 回挑战」的可复用订阅方，soul / shard 共用。
+- `flows/battle_cycle.py` —— 「挑战 → 战斗 → 结算 → 回挑战」的可复用订阅方，soul / shard 共用；
+- `flows/stage_cycle.py` —— 「点起始界面 → 自适应等待 → 点结算界面」的两阶段订阅方，
+  event-aband3t / event-aj8fer 共用（旧的写死 `sleep(120)` / 均值预测都由它接管）；
+- `flows/rules.py` —— `ProbeWhileWaiting`，把旧代码里到处出现的
+  `wait(X, on_wait=lambda: click(Y))`（边等边点）抽成独立订阅方：
+  `unless_state=X` 对应旧的 `wait`，`only_state=X` 对应旧的 `wait_gone`。
 
 **topic 一览**（详见 `flows/signals.py`）：
 
@@ -325,12 +335,19 @@ python -m pytest tests -q
 1. **坐标未重新标定**：`config/coordinates.py` 的数值从旧脚本原样迁移，基准按 1024×768 客户区假设。
    若你的客户端尺寸不同，`Viewport` 会等比缩放，但个别按钮仍可能需要微调；先用 `--check` 看缩放比例。
 2. **模板图片与客户端版本强绑定**：游戏更新 UI 后需要重新截图。
-3. **等待时间：soul / shard 已自适应，其余仍是经验值**：走事件引擎的流程会记住每轮 / 每场战斗的耗时，
-   下次先「盲等」到接近历史 p10 再细粒度识图（`core/timing.py`，`--no-adaptive-wait` 可关）；
-   其余流程仍按固定秒数等待（各 Flow 的 `BATTLE_*` 常量），`event-aj8fer` 用 `core/stopwatch.py` 的均值预测。
+3. **等待时间全部走自适应，但头几轮仍需攒样本**：9 个流程都用 `core/timing.py` 记住每轮 / 每阶段耗时，
+   下次先「盲等」到接近历史 p10 再细粒度识图（`--no-adaptive-wait` 可关）。
+   可用样本不足 `TIMING_WARMUP_SAMPLES`(5) 时不盲等，改为沿用各 Flow 里写死的经验值
+   （`BATTLE_DURATION` / `SETTLE_WAIT` / `STAGE_WAIT` / `BATTLE_PRE_WAIT` 等），
+   所以**头几轮的行为与改造前一致**，之后才逐步收敛。
 4. **无端到端测试**：涉及真实截图与点击的路径只能人工验证。
 5. `tools/` 下的归档工具未做质量修复（部分依赖 TensorFlow 1.x、PyAudio、pywin32）。
 6. **macOS 长时间挂机限制**：显示器休眠或手机锁屏时，合成点击根本送不到目标窗口。脚本会在检测到「主显示器休眠」时告警一次（`_warn_if_display_asleep`），但修不了它 —— 挂机跑之前要么关掉系统自动休眠，要么 `caffeinate -di python main.py ...`。
    窗口**激活**失败（切窗口、刚唤醒、osascript 超时）已经能自愈：自动重试 -> 跳过本次点击 -> 下一拍重来；连续失败到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才以退出码 1 干净退出。
-7. **只有 `soul` / `shard` 迁移到事件驱动**：其余 7 个流程仍是命令式 `wait -> click` 写法。
-   引擎与订阅方是通用的（`flows/engine.py` + `flows/battle_cycle.py`），迁移其余流程属于后续工作。
+7. **7 个新迁移的流程尚未真机验证**：`awake` / `seal` / `heart` / `breakthrough` / `explore` /
+   `event-aband3t` / `event-aj8fer` 都已改成事件驱动，但真机只跑通过 `soul`。
+   装配层面有演练覆盖（引擎组装、watch 列表、订阅数、超时预算），真实界面时序仍需人工验证；
+   出问题时先加 `--no-adaptive-wait` 排除自适应等待的影响。
+8. **`flows/explore/dog_food.py` 调用了不存在的 `Flow.double_click`**：换狗粮时会 `AttributeError`。
+   这是迁移前就存在的缺陷（不是本次引入），本次未修 —— 修法是给 `Flow` 加一个转发到
+   `controller.double_click` 的方法。

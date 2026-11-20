@@ -105,7 +105,7 @@ storage/    sqlite 持久化（动作耗时样本，用于预测等待时间）
 states/     状态机：一个状态一个文件，全部定义成常量
 actions/    操作层：找窗口 → 坐标换算 → 拟人化点击
 flows/      功能编排：explore / soul / awake / breakthrough / seal / heart_dojo / events
-            + 主流程引擎 engine.py、事件定义 signals.py、可复用订阅方 battle_cycle.py
+            + 主流程引擎 engine.py、事件定义 signals.py、可复用订阅方 battle_cycle.py / stage_cycle.py / rules.py
 assets/     模板图片（assets/templates/*.png）
 tests/      单元测试（不依赖 cv2 / pyautogui，不截屏不点击）
 tools/      维护工具（模板图片管理 Web 界面）+ 周边归档（语音、远控、Flask demo 等）
