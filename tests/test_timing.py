@@ -459,6 +459,33 @@ def test_plan_describe_mentions_blind_wait(timer, clock):
     assert "盲等" in text and "轮询" in text
 
 
+def test_spread_display_is_capped_for_bimodal_phases(timer, clock):
+    """双峰阶段的 spread 会爆表，显示必须收敛成可读的形式。
+
+    真机 soul:challenge 就是这种形态：要么点完结算瞬间返回（0.03 秒），
+    要么补点两次花 20 秒。p50 落在极小值那侧，spread=(max-min)/p50 算出 46803%，
+    日志里打成 "波动=46803%" —— 数字没错，但没法读也没有额外信息量。
+    """
+    from core.timing import _format_spread
+
+    assert _format_spread(0.0) == "0%"
+    assert _format_spread(0.234) == "23%"
+    assert _format_spread(9.98) == "998%"
+    assert _format_spread(9.99) == ">=999%"
+    assert _format_spread(468.03) == ">=999%"
+
+    # 复刻真机形态：5 个瞬间返回 + 1 个 20 秒
+    for _ in range(settings.TIMING_WARMUP_SAMPLES):
+        record(timer, clock, 0.03)
+    record(timer, clock, 20.5)
+
+    estimate = timer.estimate(KEY)
+    assert estimate.spread > 9.99, "这个形态下 spread 本该爆表"
+    text = estimate.describe()
+    assert ">=999%" in text
+    assert "%" in text and "波动=>=999%" in text
+
+
 # --------------------------------------------------------------------------- #
 # 工具函数
 # --------------------------------------------------------------------------- #

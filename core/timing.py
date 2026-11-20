@@ -94,10 +94,10 @@ class Estimate:
         if not self.samples:
             return "无样本"
         return ("样本 {} 个（可用 {}）min={:.1f}s p10={:.1f}s p50={:.1f}s "
-                "mean={:.1f}s 波动={:.0%} 连续异常={}{}".format(
+                "mean={:.1f}s 波动={} 连续异常={}{}".format(
                     self.samples, self.usable, self.minimum or 0.0, self.p10 or 0.0,
-                    self.p50 or 0.0, self.mean or 0.0, self.spread, self.overruns,
-                    "" if self.converged else " 未收敛"))
+                    self.p50 or 0.0, self.mean or 0.0, _format_spread(self.spread),
+                    self.overruns, "" if self.converged else " 未收敛"))
 
 
 @dataclass(frozen=True)
@@ -469,6 +469,19 @@ class CycleTimer:
 # --------------------------------------------------------------------------- #
 # 工具函数
 # --------------------------------------------------------------------------- #
+def _format_spread(spread: float) -> str:
+    """把 spread 格式化成能读的百分比。
+
+    spread = (max-min)/p50，对双峰阶段会爆表：soul:challenge 要么点完结算瞬间返回
+    （0.03 秒）、要么补点两次花 20 秒，p50 落在极小值那侧，算出来是 45970%。
+    数字本身没错，但四万多的百分比没法读，也没有额外信息量 —— 超过 999% 一律
+    显示为 ">=999%"，意思是「这个阶段耗时极不稳定」，够用了。
+    """
+    if spread >= 9.99:
+        return ">=999%"
+    return "{:.0%}".format(spread)
+
+
 def _outlier_limit(median: float) -> float:
     """异常判据阈值 = max(相对倍数, 绝对下限)。
 
