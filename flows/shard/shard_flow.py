@@ -10,9 +10,10 @@
 不是开局能选定的），所以两条路同时监听、按屏幕上实际出现的界面走：
 
 1. 直接回到挑战按钮界面 -> `BattleCycle` 收到 `state.entered.SHARD_CHALLENGE`，直接开战；
-2. 被踢回探索章节界面（如「第十八章」+ 三个头像）-> `ShardEntryNav` 导航一圈：
-   点章节界面上的 Boss 头像 -> 等「式神碎片」入口面板并点击 ->
-   等碎片列表行（头像 + 等级）并点击 -> 回到挑战按钮界面，交给 `BattleCycle`。
+2. 被踢回探索章节界面（如「第十八章」+ 三个头像）-> `ShardEntryNav` 导航：
+   点章节面板上的紫色 Boss 头像 -> 副本界面上点「式神碎片」入口条 ->
+   直接回到挑战按钮界面，交给 `BattleCycle`（第十八章实测**没有**中间的碎片列表屏；
+   `SHARD_FRAGMENT_ROW` 仍登记着，为的是别的章节可能出现列表行）。
 
 实现要点：
 - 导航订阅方是**状态响应式**的（看到哪个导航界面就点哪个），不做线性阶段门控 ——
@@ -57,7 +58,7 @@ NAV_STUCK_RETRY = 8.0
 
 
 class ShardEntryNav:
-    """章节入口导航订阅方：头像 -> 入口面板 -> 列表行，看到哪个点哪个。
+    """章节入口导航订阅方：头像 -> 「式神碎片」入口条 -> 挑战界面，看到哪个点哪个。
 
     **不做导航顺序门控**：一轮可能从任意界面开始，且两种入口会随机交替出现，
     线性门控（必须先 A 再 B 再 C）会把「开局就在列表界面」这种情况挡死。
@@ -97,8 +98,8 @@ class ShardEntryNav:
         # 遮蔽」的模板必须排最前：
         # - 结算画面第一：导航模板在结算画面上也会误命中（实测入口面板 0.85）。排在
         #   结算前面就会永久遮蔽结算识别 —— 真机因此卡死近 4 分钟点不掉结算；
-        # - 挑战按钮第二：挑战界面上列表行 / 入口面板都可能命中（旧尺度表下 0.791 / 0.925；
-        #   尺度收紧后 0.460 / 0.791，入口面板再由 0.85 阈值挡住）；
+        # - 挑战按钮第二：挑战界面上入口条也会显示（重裁模板实测 0.895），由它的
+        #   0.92 阈值挡；列表行在挑战界面只有 0.460，本来就达标不了；
         # - 列表行在头像前：列表界面上两者都命中（行内含同一个头像），取更具体的行。
         engine.watch(SHARD_BATTLE_END, SHARD_CHALLENGE, SHARD_FRAGMENT_ROW,
                      SHARD_FRAGMENT_ENTRY, SHARD_CHAPTER_BOSS)
@@ -242,15 +243,16 @@ class ShardFlow(Flow):
         controller: Optional[GameController] = None,
         machine=None,
         times: int = 10,
-        chapter_nav: bool = False,
+        chapter_nav: bool = True,
         **kwargs: Any,
     ) -> None:
         """kwargs 透传给 Flow（bus / timer / adaptive / clock / sleeper）。
 
-        chapter_nav : 是否挂「章节入口导航」订阅方，**默认 False**。
-                      那三张模板（章节头像 / 入口面板 / 列表行）是从外部截图裁的，
-                      比例约为当前镜像窗口的 2 倍，在正确尺度上匹配不上，只有缩小
-                      匹配的噪声 —— 重裁之前挂上去就是在游戏里乱点（AGENTS.md 已知限制 8）。
+        chapter_nav : 是否挂「章节入口导航」订阅方，默认 True。
+                      2026-11-21 用探针法把「章节头像」「入口条」两张模板按当前窗口
+                      比例从实时截屏重裁后，导航链已在真机走通
+                      （章节界面 -> 点头像 -> 副本界面 -> 点入口条 -> 挑战按钮 0.999）。
+                      传 False 可退回「只认挑战界面」的旧行为。
         """
         super().__init__(controller=controller, machine=machine, **kwargs)
         self.times = times
@@ -273,20 +275,14 @@ class ShardFlow(Flow):
             challenge_timeout=self.CHALLENGE_TIMEOUT,
             battle_timeout=self.BATTLE_TIMEOUT,
             missing_challenge_message=self.MISSING_CHALLENGE_MESSAGE,
-            # 结算画面必须排在挑战按钮前面：挑战按钮在结算画面上有 0.654 的余量，
-            # 但 `detect_first` 是顺序优先的，一旦越过阈值就会把结算遮死（真机卡过）
+            # 结算画面必须排在挑战按钮前面：`detect_first` 是顺序优先的，
+            # 挑战按钮在结算画面上只要越过阈值就会把结算遮死（真机卡死过 4 分钟）
             watch_end_first=True,
         )
         if self.chapter_nav:
             # 导航订阅方要读 cycle.phase 做门控，所以 cycle 先构造；但**先挂 nav**：
             # watch 顺序即优先级，必须由 nav 定下完整顺序（见 attach 注释）
             ShardEntryNav(engine, cycle=cycle).attach()
-        else:
-            self.log.warning(
-                "章节入口导航未启用（碎片章节头像 / 入口面板 / 列表行 三张模板比例不对，"
-                "只有缩小匹配的噪声）：结算后若被踢回探索章节界面，脚本不会自己导航回去，"
-                "而是等到挑战预算超时后停下。手工点进碎片界面即可继续。"
-                "重裁模板见 AGENTS.md 已知限制 8")
         cycle.attach()
         engine.run_rounds(
             self.times,

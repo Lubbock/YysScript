@@ -144,8 +144,8 @@ def store(tmp_path):
 def make_flow(game, clock, store, times=2, chapter_nav=True):
     """默认开着章节入口导航，好测导航链的行为。
 
-    真实运行时 ShardFlow 的 chapter_nav 默认 False：那三张导航模板比例不对，
-    重裁之前挂上就是在游戏里乱点（见 test_default_run_does_not_navigate）。
+    真实运行时 ShardFlow 的 chapter_nav 默认 True（模板已重裁、真机走通）；
+    这里显式传参以便两条路径都能测。
     """
     return ShardFlow(
         controller=game,
@@ -419,29 +419,36 @@ def test_battle_false_positive_fires_entered_once_not_every_poll(clock, store):
     assert len(seen) == 2
 
 
-def test_thresholds_above_the_2026_11_21_noise_ceiling():
-    """两张被抬到 0.85 的阈值，必须高于当天在真机上量到的噪声上界、低于真命中下界。
+def test_thresholds_match_the_recropped_templates():
+    """阈值卡在重裁模板后的实测矩阵之间（尺度 1.0~0.4、下限 24px）。
 
-    数据来自 `python3 - <<EOF` 直接对镜像窗口（690x356，尺度 1.0~0.8）逐状态 locate：
-      挑战界面：挑战按钮 0.999 / 入口面板 0.791 / 章节头像 0.534 / 列表行 0.460
-    注：更早记录的 0.925 / 0.845 / 0.721 那批数字是旧尺度表试到 0.3 时缩小匹配的噪声
-    （命中框只有 20×26、67×25 像素），尺度收紧后不再复现，别拿它们当依据。
+    模板用探针法按当前窗口比例从实时截屏重裁（章节头像 30x30 / 入口条 111x41）：
+      章节界面：头像 0.986 / 入口条 0.774 / 挑战按钮 0.479
+      副本界面：入口条 1.000 / 挑战按钮 0.749 / 头像 0.436
+      挑战界面：挑战按钮 0.999 / 入口条 0.895 / 头像 0.468
+    注：更早记录的 0.925 / 0.845 / 0.721 那批是旧尺度表试到 0.3 的缩小匹配噪声
+    （命中框 20×26、67×25 像素），尺度收紧后不再复现，别拿它们当依据。
     """
-    assert SHARD_CHALLENGE.threshold < 0.999, "挑战界面上的真命中，别抬到识别不到"
-    assert SHARD_CHALLENGE.threshold > 0.791, "要高于同屏其它模板的噪声上界"
-    assert SHARD_FRAGMENT_ENTRY.threshold > 0.791, "入口面板在挑战界面的实测噪声"
-    assert SHARD_FRAGMENT_ENTRY.threshold < 1.0
+    assert SHARD_CHALLENGE.threshold < 0.999, "挑战界面真命中，别抬到识别不到"
+    assert SHARD_CHALLENGE.threshold > 0.749, "副本界面上挑战按钮的实测噪声 0.749"
+    assert SHARD_FRAGMENT_ENTRY.threshold > 0.895, "挑战界面上入口条的实测噪声 0.895"
+    assert SHARD_FRAGMENT_ENTRY.threshold < 1.000, "副本界面上入口条的真命中 1.000"
+    assert 0.468 < SHARD_CHAPTER_BOSS.threshold < 0.986, "头像：挑战界面 0.468 / 章节界面 0.986"
 
 
 # --------------------------------------------------------------------------- #
-# 导航默认关闭：三张导航模板比例不对，重裁之前不许挂上去
+# 章节入口导航：模板重裁后默认开启，可关
 # --------------------------------------------------------------------------- #
-def test_default_run_does_not_navigate(clock, store):
-    """chapter_nav 默认 False：停在章节界面上一个导航模板都不点，按旧语义超时中止。
+def test_chapter_nav_defaults_to_true():
+    """2026-11-21 用探针法重裁「章节头像」「入口条」后，导航链真机走通，默认开启。"""
+    assert ShardFlow(controller=object(), machine=object()).chapter_nav is True
 
-    那三张模板（章节头像 / 入口面板 / 列表行）是从外部截图裁的，比例约为当前镜像窗口的
-    2 倍，在正确尺度上匹配不上，只会产生缩小匹配的噪声（真机量到 20x26 的块撞出 0.96）。
-    挂上去就是在游戏里乱点，浪费挑战券 —— 所以默认不挂。
+
+def test_chapter_nav_can_be_disabled(clock, store):
+    """显式关掉导航时：停在章节界面上一个导航模板都不点，按挑战预算超时中止。
+
+    （旧行为：三张模板比例不对时默认关闭，防止照缩小噪声乱点浪费挑战券。
+    重裁后默认打开，但关闭路径的行为仍要可预期 —— 别的章节若模板失效就用它兜底。）
     """
     game = FakeShardGame(clock, script=["chapter"])
     game.screen = "chapter"
@@ -481,7 +488,7 @@ def test_watch_deduplicates_across_subscribers(clock, store):
 
 
 def test_main_does_not_pass_chapter_nav():
-    """命令行不传 chapter_nav，所以真实运行走默认值 False。"""
+    """命令行不传 chapter_nav，真实运行走 ShardFlow 的默认值（现为 True）。"""
     from main import build_parser
 
     parser = build_parser()

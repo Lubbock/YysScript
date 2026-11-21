@@ -6,6 +6,7 @@ SHARD_FRAGMENT_ROW = State(
     label="碎片列表行",
     templates=("碎片列表行.png",),
     kind=StateKind.MARKER,
-    description="碎片列表里「头像 + 等级」的一行；命中即点击，进入挑战界面，"
-                "之后由既有的 SHARD_CHALLENGE（菱形挑战按钮）接手开战",
+    description="碎片列表里「头像 + 等级」的一行。第十八章实测**没有这一屏**："
+                "点入口条直接到挑战界面。保留登记是为了别的章节可能出现列表；"
+                "模板尚未按当前比例重截，匹配不上时不触发任何东西（宁缺毋滥）",
 )
