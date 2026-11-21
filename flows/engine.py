@@ -138,8 +138,16 @@ class FlowEngine:
 
     # ------------------------------------------------------------------ 配置
     def watch(self, *states) -> "FlowEngine":
-        """登记要轮询识别的状态（顺序即优先级，detect_first 按序命中）。"""
-        self._watched = self._watched + tuple(states)
+        """登记要识别的状态（顺序即优先级，detect_first 按序命中）。
+
+        重复登记会被忽略：多个订阅方常常都要同一个状态（如结算画面），
+        但优先级只该由**第一次**登记的位置决定，否则列表里全是重复项。
+        """
+        for state in states:
+            key = getattr(state, "key", state)
+            if any(getattr(watched, "key", watched) == key for watched in self._watched):
+                continue
+            self._watched = self._watched + (state,)
         return self
 
     def unwatch(self, state) -> None:

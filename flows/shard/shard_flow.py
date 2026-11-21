@@ -242,11 +242,19 @@ class ShardFlow(Flow):
         controller: Optional[GameController] = None,
         machine=None,
         times: int = 10,
+        chapter_nav: bool = False,
         **kwargs: Any,
     ) -> None:
-        """kwargs 透传给 Flow（bus / timer / adaptive / clock / sleeper）。"""
+        """kwargs 透传给 Flow（bus / timer / adaptive / clock / sleeper）。
+
+        chapter_nav : 是否挂「章节入口导航」订阅方，**默认 False**。
+                      那三张模板（章节头像 / 入口面板 / 列表行）是从外部截图裁的，
+                      比例约为当前镜像窗口的 2 倍，在正确尺度上匹配不上，只有缩小
+                      匹配的噪声 —— 重裁之前挂上去就是在游戏里乱点（AGENTS.md 已知限制 8）。
+        """
         super().__init__(controller=controller, machine=machine, **kwargs)
         self.times = times
+        self.chapter_nav = chapter_nav
 
     # ------------------------------------------------------------------ 主流程
     def run(self) -> None:
@@ -265,10 +273,20 @@ class ShardFlow(Flow):
             challenge_timeout=self.CHALLENGE_TIMEOUT,
             battle_timeout=self.BATTLE_TIMEOUT,
             missing_challenge_message=self.MISSING_CHALLENGE_MESSAGE,
+            # 结算画面必须排在挑战按钮前面：挑战按钮在结算画面上有 0.654 的余量，
+            # 但 `detect_first` 是顺序优先的，一旦越过阈值就会把结算遮死（真机卡过）
+            watch_end_first=True,
         )
-        # 导航订阅方要读 cycle.phase 做门控，所以 cycle 先构造；但**先挂 nav**：
-        # watch 顺序即优先级，必须由 nav 定下「挑战按钮排第一」（见 attach 注释）
-        ShardEntryNav(engine, cycle=cycle).attach()
+        if self.chapter_nav:
+            # 导航订阅方要读 cycle.phase 做门控，所以 cycle 先构造；但**先挂 nav**：
+            # watch 顺序即优先级，必须由 nav 定下完整顺序（见 attach 注释）
+            ShardEntryNav(engine, cycle=cycle).attach()
+        else:
+            self.log.warning(
+                "章节入口导航未启用（碎片章节头像 / 入口面板 / 列表行 三张模板比例不对，"
+                "只有缩小匹配的噪声）：结算后若被踢回探索章节界面，脚本不会自己导航回去，"
+                "而是等到挑战预算超时后停下。手工点进碎片界面即可继续。"
+                "重裁模板见 AGENTS.md 已知限制 8")
         cycle.attach()
         engine.run_rounds(
             self.times,

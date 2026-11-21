@@ -63,6 +63,8 @@ class BattleCycle:
         retry_pause       : 每次补点之间的缓冲等待（御魂用 2 秒）
         back_timeout      : 每次「等挑战界面回来」的超时
         back_interval     : 等挑战界面回来的轮询间隔
+        watch_end_first   : 登记识别状态时把结算画面排在挑战按钮前面（默认 False，即挑战
+                            按钮在前）。只影响 detect_first 的优先级，不改别的语义
         wait_back         : 点完结算后是否等挑战界面回来（默认 True）。结算后画面不一定
                             回到挑战界面时应设 False，否则每轮白等并告警（shard 的章节
                             入口：结算后被踢回章节界面，要导航 头像->面板->列表行 一圈
@@ -88,6 +90,7 @@ class BattleCycle:
         challenge_timeout: Optional[float] = None,
         battle_timeout: Optional[float] = None,
         missing_challenge_message: Optional[str] = None,
+        watch_end_first: bool = False,
         name: Optional[str] = None,
     ) -> None:
         self.engine = engine
@@ -108,6 +111,7 @@ class BattleCycle:
         self.back_timeout = float(back_timeout)
         self.back_interval = float(back_interval)
         self.wait_back = bool(wait_back)
+        self.watch_end_first = bool(watch_end_first)
         self.challenge_timeout = challenge_timeout
         self.battle_timeout = battle_timeout
         self.missing_challenge_message = missing_challenge_message or (
@@ -139,7 +143,13 @@ class BattleCycle:
     def attach(self) -> "BattleCycle":
         """登记要识别的状态并订阅事件；返回自身以便链式调用。"""
         engine = self.engine
-        engine.watch(self.challenge, *self.end_states)
+        # 默认挑战按钮在前；watch_end_first=True 时结算画面在前。`detect_first` 是
+        # 顺序优先而不是分数优先，所以这个顺序决定了「谁会被谁遮掉」：碎片的导航 /
+        # 挑战模板在结算画面上都能命中，结算模板不排第一就永远点不掉结算（真机卡死过）
+        if self.watch_end_first:
+            engine.watch(*self.end_states, self.challenge)
+        else:
+            engine.watch(self.challenge, *self.end_states)
         self._subs = [
             engine.on(TOPIC_ROUND_STARTED, self.on_round_started, priority=-50),
             engine.on(topic_for(PREFIX_STATE_ENTERED, self.challenge), self.on_challenge),

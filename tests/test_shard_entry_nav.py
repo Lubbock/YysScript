@@ -141,11 +141,17 @@ def store(tmp_path):
     return DurationStore(database=Database(tmp_path / "shard.db"))
 
 
-def make_flow(game, clock, store, times=2):
+def make_flow(game, clock, store, times=2, chapter_nav=True):
+    """默认开着章节入口导航，好测导航链的行为。
+
+    真实运行时 ShardFlow 的 chapter_nav 默认 False：那三张导航模板比例不对，
+    重裁之前挂上就是在游戏里乱点（见 test_default_run_does_not_navigate）。
+    """
     return ShardFlow(
         controller=game,
         machine=game,
         times=times,
+        chapter_nav=chapter_nav,
         timer=CycleTimer(store=store, clock=clock, adaptive=False),
         clock=clock,
         sleeper=clock.sleep,
@@ -425,3 +431,59 @@ def test_thresholds_above_the_2026_11_21_noise_ceiling():
     assert SHARD_CHALLENGE.threshold > 0.791, "要高于同屏其它模板的噪声上界"
     assert SHARD_FRAGMENT_ENTRY.threshold > 0.791, "入口面板在挑战界面的实测噪声"
     assert SHARD_FRAGMENT_ENTRY.threshold < 1.0
+
+
+# --------------------------------------------------------------------------- #
+# 导航默认关闭：三张导航模板比例不对，重裁之前不许挂上去
+# --------------------------------------------------------------------------- #
+def test_default_run_does_not_navigate(clock, store):
+    """chapter_nav 默认 False：停在章节界面上一个导航模板都不点，按旧语义超时中止。
+
+    那三张模板（章节头像 / 入口面板 / 列表行）是从外部截图裁的，比例约为当前镜像窗口的
+    2 倍，在正确尺度上匹配不上，只会产生缩小匹配的噪声（真机量到 20x26 的块撞出 0.96）。
+    挂上去就是在游戏里乱点，浪费挑战券 —— 所以默认不挂。
+    """
+    game = FakeShardGame(clock, script=["chapter"])
+    game.screen = "chapter"
+    flow = make_flow(game, clock, store, times=1, chapter_nav=False)
+
+    with pytest.raises(FlowAbortedError):
+        flow.run()
+
+    assert game.clicks == [], "导航关闭时不该有任何点击"
+
+
+def test_default_run_watches_only_challenge_and_end(clock, store):
+    """导航关闭时只登记挑战按钮与结算画面，且结算排在挑战按钮前面。"""
+    game = FakeShardGame(clock)
+    flow = make_flow(game, clock, store, times=1, chapter_nav=False)
+    engine = flow.create_engine()
+    from flows.battle_cycle import BattleCycle
+    BattleCycle(engine, challenge=SHARD_CHALLENGE, end_states=flow.END_STATES,
+                watch_end_first=True).attach()
+
+    keys = [getattr(state, "key", state) for state in engine.watched]
+    assert keys == [SHARD_BATTLE_END.key, SHARD_CHALLENGE.key]
+
+
+def test_watch_deduplicates_across_subscribers(clock, store):
+    """两个订阅方都要结算画面时，登记顺序只由第一次决定，列表里不留重复项。"""
+    game = FakeShardGame(clock)
+    flow = make_flow(game, clock, store, times=1)
+    engine = flow.create_engine()
+    ShardEntryNav(engine).attach()
+    from flows.battle_cycle import BattleCycle
+    BattleCycle(engine, challenge=SHARD_CHALLENGE, end_states=flow.END_STATES).attach()
+
+    keys = [getattr(state, "key", state) for state in engine.watched]
+    assert len(keys) == len(set(keys)), "重复登记应该被忽略：{}".format(keys)
+    assert keys[0] == SHARD_BATTLE_END.key, "结算画面仍是第一优先级"
+
+
+def test_main_does_not_pass_chapter_nav():
+    """命令行不传 chapter_nav，所以真实运行走默认值 False。"""
+    from main import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(["shard", "--times", "50"])
+    assert not hasattr(args, "shard_chapter_nav")
