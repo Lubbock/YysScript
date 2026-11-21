@@ -12,10 +12,10 @@
     结算 --点结算--> 按 script 决定回「挑战界面」还是「章节界面」
     章节界面 --点头像--> 入口面板 --点面板--> 列表行 --点行--> 挑战界面
 
-四处模板误命中都在假游戏里复现（全是真机实测到的）：
-- 挑战界面上「碎片列表行」命中 0.791、「碎片入口面板」命中 0.925；
-- 战斗画面上「碎片入口面板」命中 0.845~0.895、「挑战按钮」命中 0.713~0.721；
-- 结算画面上「碎片入口面板」命中 0.85；
+四处模板误命中都在假游戏里复现（行为都是真机上真实发生过的）：
+- 挑战界面上「碎片列表行」「碎片入口面板」都会命中；
+- 战斗画面上「碎片入口面板」「挑战按钮」都会命中（真机照着点到了右上角）；
+- 结算画面上「碎片入口面板」也会命中（把结算识别遮死，卡了近 4 分钟）；
 - 列表行界面上「章节 Boss 头像」也会命中（行里含同一个头像）。
 
 `detect_first` 是**顺序优先而不是分数优先**，所以 watch 顺序是主要防线：
@@ -413,7 +413,15 @@ def test_battle_false_positive_fires_entered_once_not_every_poll(clock, store):
     assert len(seen) == 2
 
 
-def test_challenge_threshold_excludes_battle_false_positive():
-    """挑战按钮阈值必须卡在「战斗画面误命中」与「挑战界面真命中」之间。"""
-    assert SHARD_CHALLENGE.threshold > 0.721, "战斗画面实测误命中上界 0.721"
-    assert SHARD_CHALLENGE.threshold < 0.995, "挑战界面实测真命中下界 0.995"
+def test_thresholds_above_the_2026_11_21_noise_ceiling():
+    """两张被抬到 0.85 的阈值，必须高于当天在真机上量到的噪声上界、低于真命中下界。
+
+    数据来自 `python3 - <<EOF` 直接对镜像窗口（690x356，尺度 1.0~0.8）逐状态 locate：
+      挑战界面：挑战按钮 0.999 / 入口面板 0.791 / 章节头像 0.534 / 列表行 0.460
+    注：更早记录的 0.925 / 0.845 / 0.721 那批数字是旧尺度表试到 0.3 时缩小匹配的噪声
+    （命中框只有 20×26、67×25 像素），尺度收紧后不再复现，别拿它们当依据。
+    """
+    assert SHARD_CHALLENGE.threshold < 0.999, "挑战界面上的真命中，别抬到识别不到"
+    assert SHARD_CHALLENGE.threshold > 0.791, "要高于同屏其它模板的噪声上界"
+    assert SHARD_FRAGMENT_ENTRY.threshold > 0.791, "入口面板在挑战界面的实测噪声"
+    assert SHARD_FRAGMENT_ENTRY.threshold < 1.0

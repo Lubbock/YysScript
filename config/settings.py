@@ -93,12 +93,19 @@ MAX_MATCHES: int = 32
 #: 匹配结果非极大值抑制的合并距离（像素），去掉同一个按钮的重复命中
 MATCH_MERGE_DISTANCE: int = 12
 
-#: 模板匹配尺度候选。运行截屏与模板采集尺度不一致时（例如 macOS 上截 iOS 镜像窗口），
-#: 逐个尺度缩放模板尝试匹配，取置信度最高的命中。
+#: 模板匹配尺度候选。运行截屏与模板采集尺度不一致时（例如 macOS 上截 iOS 镜像窗口
+#: 后被拖拽缩放），逐个尺度缩放模板尝试匹配，取置信度最高的命中。
 #: 可用环境变量 YYS_TEMPLATE_SCALES 覆盖，例如 "1.0,0.8,0.6"。
+#:
+#: macOS 上原来一直试到 0.3，那是错的：尺度下限真正的约束是**缩放后的绝对像素数**，
+#: 不是比例。41×51 的模板缩到 20×26 就没有判别力，在任何画面上都能撞上 0.9 分，
+#: 脚本会照着假命中去点击（真机在探索章节界面上反复点同一个空白处，永远进不了碎片）。
+#: 1.0~0.8 足够容忍镜像窗口缩到八成；确实需要更大范围再用环境变量显式覆盖。
 TEMPLATE_SCALES: Tuple[float, ...] = (
-    (1.0,) if os.name == "nt" else (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3)
+    (1.0,) if os.name == "nt" else (1.0, 0.9, 0.8)
 )
+#: 缩放后模板每条边的像素下限；低于它的尺度直接跳过（策略见 vision/scales.py）
+MIN_SCALED_TEMPLATE_SIDE: int = 32
 _ENV_SCALES = os.environ.get("YYS_TEMPLATE_SCALES")
 if _ENV_SCALES:
     TEMPLATE_SCALES = tuple(float(item) for item in _ENV_SCALES.split(",") if item.strip())
