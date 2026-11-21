@@ -136,21 +136,81 @@ def test_template_matcher_applies_the_floor():
     assert tm.TemplateMatcher._scaled(tpl, 1.0) is tpl, "尺度 1.0 直接用原模板"
 
 
-def test_usable_helper_warns_once_per_template():
-    """尺度被筛掉时要 warn（模板裁错比例是配置问题），但每张模板只喊一次。"""
+def test_warns_only_when_nothing_matched():
+    """筛掉尺度不是错误；只有「一个都没匹配上」才提示重截模板。
+
+    真机上出现过误报：56x55 的挑战按钮在 0.4 尺度被下限筛掉（它本来在 1.0 上命中
+    0.999），旧写法每次识图都刷一条「这张模板不是按当前窗口比例截的」，把真信号埋掉。
+    """
     pytest.importorskip("cv2")
     import numpy as np
 
     from vision.template_matcher import TemplateMatcher
 
-    matcher = TemplateMatcher.__new__(TemplateMatcher)   # 不建 capture，只测 _usable
+    matcher = TemplateMatcher.__new__(TemplateMatcher)   # 不建 capture，只测纯逻辑
     matcher._warned = set()
     small = np.zeros((51, 41), dtype=np.uint8)           # 41 宽 x 51 高
 
-    kept = matcher._usable("碎片章节头像.png", small, (1.0, 0.9, 0.8, 0.5, 0.3))
+    kept, dropped = TemplateMatcher._usable(small, (1.0, 0.9, 0.8, 0.5, 0.3))
     assert kept == (1.0, 0.9, 0.8)
-    assert "碎片章节头像.png" in matcher._warned, "第一次筛掉必须喊出来"
-
+    assert dropped == (0.5, 0.3)
+    # 调用点才决定要不要喊：能匹配上（下面 test_warn_is_not_spurious_when_template_matches）
+    # 就根本不进这里，这里被调到就意味着这一拍一个都没命中
+    matcher._warn_unmatched("碎片章节头像.png", small, (1.0, 0.5), (0.5,))
+    assert "碎片章节头像.png" in matcher._warned
     before = set(matcher._warned)
-    matcher._usable("碎片章节头像.png", small, (1.0, 0.5))
+    matcher._warn_unmatched("碎片章节头像.png", small, (1.0, 0.5), (0.5,))
     assert matcher._warned == before, "同一张模板不能每次识图都刷一条 warning"
+
+
+def test_warn_is_not_spurious_when_template_matches(tmp_path):
+    """模板能匹配上时，即使有尺度被下限筛掉也不该 warn。
+
+    真机上就是这条误报在刷屏：56x55 的挑战按钮在 0.4 尺度被筛掉（它在 1.0 上命中
+    0.999），旧写法每次识图都提示「请重新截图」，把真正的信号埋掉了。
+    """
+    pytest.importorskip("cv2")
+    import numpy as np
+    import cv2
+
+    from vision.capture import ScreenCapture
+    from vision.template_matcher import TemplateMatcher
+    from vision.types import Frame
+
+    rng = np.random.RandomState(7)
+    patch = rng.randint(0, 255, size=(51, 41)).astype(np.uint8)     # 41 宽 x 51 高
+    canvas = np.zeros((200, 300), dtype=np.uint8)
+    canvas[60:111, 120:161] = patch                                  # 把模板放进画面里
+
+    class FakeCapture(ScreenCapture):
+        def __init__(self):                                         # 不碰真实截屏
+            pass
+
+        def grab_gray(self, region=None):
+            return Frame(image=canvas, origin=(0, 0), size=(300, 200))
+
+    cv2.imwrite(str(tmp_path / "对得上的模板.png"), patch)
+    cv2.imwrite(str(tmp_path / "对不上的模板.png"),
+                rng.randint(0, 255, size=(51, 41)).astype(np.uint8))
+
+    matcher = TemplateMatcher(capture=FakeCapture(), template_dir=tmp_path)
+
+    hit = matcher.match("对得上的模板.png", threshold=0.7)
+    assert hit is not None and hit.score > 0.99
+    assert "对得上的模板.png" not in matcher._warned, "命中了就不该喊重截"
+
+    assert matcher.match("对不上的模板.png", threshold=0.7) is None
+    assert "对不上的模板.png" in matcher._warned, "匹配不到又筛掉过尺度，才该提示重截"
+
+
+def test_never_drops_scale_1_0():
+    """1.0 永远可用：模板再小也按原尺寸试一次，匹配不到就走「未识别」。"""
+    pytest.importorskip("cv2")
+    import numpy as np
+
+    from vision.template_matcher import TemplateMatcher
+
+    tiny = np.zeros((16, 16), dtype=np.uint8)
+    kept, dropped = TemplateMatcher._usable(tiny, (1.0, 0.9, 0.8))
+    assert kept == (1.0,)
+    assert dropped == (0.9, 0.8)

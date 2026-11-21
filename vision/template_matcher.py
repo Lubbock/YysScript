@@ -6,8 +6,8 @@
 2. 路径来自 config.settings.TEMPLATE_DIR，不再写死 E:/github/...；
 3. 命中结果做非极大值抑制，同一个按钮不会返回几十个重复点；
 4. 返回 Box（含左上角 + 宽高），既能取中心点也能复现旧的右下角行为；
-5. 尺度候选按「缩放后的绝对像素下限」筛掉不可信的尺度（见 vision/scales.py）——
-   缩得太小的模板没有判别力，会在任意画面上撞出高分假命中。
+5. 多尺度匹配前按「缩放后的绝对像素下限」筛掉不可信的尺度（见 vision/scales.py）——
+   模板缩到几十像素就没有判别力，会在任意画面上撞出高分假命中，脚本照着点就是乱点。
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class TemplateMatcher:
         self._capture = capture or ScreenCapture()
         self._template_dir = Path(template_dir) if template_dir else settings.TEMPLATE_DIR
         self._cache: Dict[str, np.ndarray] = {}
-        #: 已经提示过「尺度被筛掉」的模板，避免每次识别都刷一条 warning
+        #: 已经提示过「这张模板可能截错了比例」的名字，避免每次识图都刷一条 warning
         self._warned: Set[str] = set()
 
     # ------------------------------------------------------------------ 模板
@@ -90,18 +90,17 @@ class TemplateMatcher:
     ) -> List[Match]:
         """返回全部命中，按置信度降序，已做去重合并。
 
-        scales 为模板尺度候选，默认读 settings.TEMPLATE_SCALES，用于截屏与模板
-        采集尺度不一致的场景（例如 macOS 上截 iOS 镜像窗口）。实际尝试的尺度还会
-        按模板尺寸过滤一遍（`_usable`），缩放后太小的一律不用。
+        scales 为模板尺度候选，默认读 settings.TEMPLATE_SCALES；实际尝试的尺度还会
+        按模板尺寸过滤一遍（`_usable`），缩放后小于像素下限的一律不用。
         """
         limit = limit or settings.MAX_MATCHES
         threshold = settings.DEFAULT_THRESHOLD if threshold is None else threshold
-        scales = tuple(scales if scales is not None else settings.TEMPLATE_SCALES) or (1.0,)
+        requested = tuple(scales if scales is not None else settings.TEMPLATE_SCALES) or (1.0,)
 
         frame = self._capture.grab_gray(region)
         template = self.load_template(filename)
         fh, fw = frame.image.shape[:2]
-        scales = self._usable(filename, template, scales)
+        scales, dropped = self._usable(template, requested)
 
         candidates: List[Match] = []
         for scale in scales:
@@ -122,6 +121,9 @@ class TemplateMatcher:
                 )
                 candidates.append(Match(box=box, score=float(result[y, x]), template=filename))
 
+        if not candidates:
+            # 一个都没匹配上才值得喊；筛掉过尺度本身不是错误（大模板只需要 1.0）
+            self._warn_unmatched(filename, template, requested, dropped)
         candidates.sort(key=lambda m: m.score, reverse=True)
         return self._suppress(candidates, limit)
 
@@ -136,26 +138,36 @@ class TemplateMatcher:
             return None
         return cv2.resize(template, (tw, th), interpolation=cv2.INTER_AREA)
 
-    def _usable(self, filename: str, template: np.ndarray,
-                scales: Sequence[float]) -> Tuple[float, ...]:
-        """筛掉会让模板失去判别力的尺度，并在第一次筛掉时提示一次。
+    @staticmethod
+    def _usable(template: np.ndarray,
+                scales: Sequence[float]) -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
+        """返回（可用尺度, 被筛掉的尺度）。
 
-        「模板裁错了尺度」是配置问题不是运行时抖动，所以要喊出来 —— 真机事故里三个
-        碎片导航模板只在 x0.3~x0.5 上「命中」，没人发现它们根本不是当前窗口的比例，
-        结果是照着 20×26 像素的假匹配在章节界面上反复点空白处。
+        筛掉的典型例子：41x51 的模板在 0.5 尺度只剩 20x25 像素，那种块在任何画面上
+        都能撞上 0.9+ 的分数（真机就照着它在探索章节界面上反复点同一个空白处）。
         """
         kept = usable_scales(template.shape[1], template.shape[0], scales)
-        dropped = [scale for scale in scales if scale not in kept]
-        if dropped and filename not in self._warned:
-            self._warned.add(filename)
-            log.warning(
-                "模板 %s（%dx%d）在尺度 %s 下缩放后小于 %d 像素，已跳过；"
-                "若它在剩下的尺度上一直匹配不到，说明这张模板不是按当前窗口比例截的，"
-                "请用 tools/asset_manager 从实时窗口重新截图",
-                filename, template.shape[1], template.shape[0],
-                "/".join("{:.1f}".format(item) for item in dropped),
-                settings.MIN_SCALED_TEMPLATE_SIDE)
-        return kept
+        dropped = tuple(scale for scale in scales if scale not in kept)
+        return kept, dropped
+
+    def _warn_unmatched(self, filename: str, template: np.ndarray,
+                        requested: Tuple[float, ...], dropped: Tuple[float, ...]) -> None:
+        """模板在所有可用尺度上都没命中，且有尺度被下限筛掉 -> 提示可能截错了比例。
+
+        这两个条件必须同时成立才 warn：只被筛掉尺度但照样命中的模板（例如 56x55 的
+        挑战按钮不需要 0.4 尺度）不该被报出来，否则每次挂机都在刷无效告警。
+        """
+        if not dropped or filename in self._warned:
+            return
+        self._warned.add(filename)
+        log.warning(
+            "模板 %s（%dx%d）在可用尺度 %s 上都没匹配到（%s 因缩放后小于 %d 像素被跳过）："
+            "若这个界面本该被识别出来，说明这张模板不是按当前窗口比例截的，"
+            "请用 tools/asset_manager 从实时窗口重新截图",
+            filename, template.shape[1], template.shape[0],
+            "/".join("{:.1f}".format(item) for item in requested if item not in dropped) or "无",
+            "/".join("{:.1f}".format(item) for item in dropped),
+            settings.MIN_SCALED_TEMPLATE_SIDE)
 
     @staticmethod
     def _suppress(candidates: List[Match], limit: int) -> List[Match]:
