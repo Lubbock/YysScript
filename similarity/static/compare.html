@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图片对比</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-compare">
+
+<header>
+  <h1>图片对比<small id="hdr-sub">加载中…</small></h1>
+  <nav class="nav">
+    <a href="/">标注采集</a>
+    <a href="/compare" class="on">图片对比</a>
+  </nav>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="toolbar">
+  <label class="field">来源
+    <select id="source">
+      <option value="window">目标窗口（模拟器 / 镜像）</option>
+      <option value="fullscreen">整屏</option>
+    </select>
+  </label>
+  <label class="field">进程名
+    <input type="text" id="process" size="16" placeholder="iPhone Mirroring">
+  </label>
+  <button id="btn-capture" class="primary" title="连点两次，依次填入 A、B 两个槽位">📷 捕获截图</button>
+  <button id="btn-compare" class="primary" disabled title="两张图都捕获后才能对比">🔍 对比</button>
+  <button id="btn-clear" disabled>🗑 清空</button>
+  <button id="btn-model" title="重新探测 Ollama 服务与模型">🧠 检测模型</button>
+  <span class="spacer"></span>
+  <span class="hint-inline" id="slot-hint">还需要捕获 2 张</span>
+</div>
+
+<main class="cmp-main">
+  <section class="cmp-slot" id="slot-a">
+    <div class="cmp-head">
+      <b>A</b>
+      <span class="cmp-time" id="time-a">未捕获</span>
+      <span class="spacer"></span>
+      <button class="cmp-recap" data-slot="a" disabled>重拍</button>
+    </div>
+    <div class="cmp-body">
+      <div class="cmp-empty" id="empty-a">点「📷 捕获截图」抓取第一张</div>
+      <img id="img-a" class="hidden" alt="截图 A" draggable="false">
+    </div>
+    <div class="cmp-foot" id="foot-a"></div>
+  </section>
+
+  <section class="cmp-slot" id="slot-b">
+    <div class="cmp-head">
+      <b>B</b>
+      <span class="cmp-time" id="time-b">未捕获</span>
+      <span class="spacer"></span>
+      <button class="cmp-recap" data-slot="b" disabled>重拍</button>
+    </div>
+    <div class="cmp-body">
+      <div class="cmp-empty" id="empty-b">再点一次「📷 捕获截图」抓取第二张</div>
+      <img id="img-b" class="hidden" alt="截图 B" draggable="false">
+    </div>
+    <div class="cmp-foot" id="foot-b"></div>
+  </section>
+</main>
+
+<section id="result" class="cmp-result hidden">
+  <div class="cmp-result-head">
+    <span id="result-badge" class="badge">—</span>
+    <b id="result-title">对比结果</b>
+    <span class="cmp-score" id="result-score"></span>
+    <span class="spacer"></span>
+    <span class="cmp-result-meta" id="result-meta"></span>
+  </div>
+  <div class="cmp-bar"><i id="result-bar"></i></div>
+  <div id="result-warn" class="cmp-warn hidden"></div>
+  <div class="cmp-grid">
+    <div><span>A 识别为</span><b id="result-a">—</b></div>
+    <div><span>B 识别为</span><b id="result-b">—</b></div>
+  </div>
+  <div id="result-diff-box" class="cmp-diffs hidden">
+    <span>模型看到的差异</span>
+    <ul id="result-diffs"></ul>
+  </div>
+  <div id="result-message" class="cmp-result-msg"></div>
+  <details id="result-details-box" class="hidden">
+    <summary>原始返回</summary>
+    <pre id="result-details"></pre>
+  </details>
+</section>
+
+<div id="toast"></div>
+<script src="/static/compare.js"></script>
+</body>
+</html>

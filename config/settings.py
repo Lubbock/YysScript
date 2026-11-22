@@ -185,3 +185,20 @@ HUMAN_PAUSE_RANGE: Tuple[float, float] = (0.0, 1.0)
 HUMAN_JITTER: int = 3
 #: 拖动时插值步数，越大轨迹越像人手
 HUMAN_DRAG_STEPS: int = 12
+
+
+# --------------------------------------------------------------------------- #
+# similarity/ 图片对比（独立实验区，不参与主流程）
+# --------------------------------------------------------------------------- #
+#: 多模态模型，必须同时支持 completion + vision。
+#: 纯 embedding 模型不行：Ollama 的 /api/embed 会静默丢弃 images 字段。
+OLLAMA_HOST: str = os.environ.get("YYS_OLLAMA_HOST", "http://127.0.0.1:11434")
+OLLAMA_MODEL: str = os.environ.get("YYS_OLLAMA_MODEL", "lfm3-omni:latest")
+#: 单次判定超时（秒）。2.4GB 模型双图推理实测 3~6 秒，冷启动更久。
+OLLAMA_TIMEOUT: float = float(os.environ.get("YYS_OLLAMA_TIMEOUT", "180"))
+#: 模型常驻时间，避免每次对比都重新加载
+OLLAMA_KEEP_ALIVE: str = os.environ.get("YYS_OLLAMA_KEEP_ALIVE", "10m")
+OLLAMA_NUM_PREDICT: int = 800
+#: 判定「同一界面」所需的最低可信度
+SIMILARITY_MATCH_THRESHOLD: float = float(
+    os.environ.get("YYS_SIMILARITY_THRESHOLD", "0.6"))

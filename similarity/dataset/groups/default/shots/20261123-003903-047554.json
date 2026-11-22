@@ -1,0 +1,34 @@
+{
+  "id": "20261123-003903-047554",
+  "image": "20261123-003903-047554.png",
+  "captured_at": "2026-11-23 00:39:03",
+  "annotations": [
+    {
+      "id": "amj3ps2zs",
+      "kind": "point",
+      "label": "标注1",
+      "point": {
+        "x": 350,
+        "y": 269
+      }
+    }
+  ],
+  "note": "",
+  "source": "window",
+  "width": 690,
+  "height": 356,
+  "origin": [
+    0,
+    72
+  ],
+  "region": [
+    0,
+    72,
+    690,
+    356
+  ],
+  "window_id": 108,
+  "process": "iPhone Mirroring",
+  "updated_at": "2026-11-23 02:18:19",
+  "group": "default"
+}

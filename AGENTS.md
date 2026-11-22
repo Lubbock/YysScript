@@ -34,6 +34,7 @@
 | `assets/` | 模板图片资源（`assets/templates/*.png`） | — | 放代码 |
 | `tests/` | 单元测试（不依赖游戏、不依赖 cv2/pyautogui） | 被测模块 | 真实截屏/点击 |
 | `tools/` | 维护工具（模板图片管理 Web 界面）+ 周边归档（语音、远控、Flask demo、安卓实验等） | 可 import 主包 | 被主流程 import |
+| `similarity/` | **另一条识别路线（实验中）**：基于图像相似度；「分组截图 + Web 标注」采集 + 「双图对比」页，对比靠本地 Ollama 多模态模型判定（不用 OpenCV）；数据集在同目录 `dataset/`，按 `groups/<key>/` 目录隔离 | `config`、`core`、`actions`、`vision`（只读复用截屏与窗口定位） | 被 flows/states import；改动模板匹配管线的行为 |
 | `var/` | 运行时产物（日志、sqlite 数据库），不进版本库 | — | 手写文件 |
 | `.worktrees/` | git worktree 隔离开发区（不入版本库）：改大功能时不影响正在运行的主工作区 | — | 在主工作区里直接改它 |
 | `main.py` | 命令行入口 | `flows`、`actions`、`core`、`config` | 写业务逻辑 |
@@ -185,6 +186,47 @@ HOME = State(
 
 ---
 
+### `similarity/` — 基于图像相似度的另一条路线（隔离实验区）
+
+与模板匹配管线（`vision/template_matcher.py` + `states/` + `flows/`）**完全隔离**：主流程不
+import 它，它只**只读复用** `actions/window.py`（定位模拟器 / 镜像窗口）与 `vision/capture.py`
+（截屏）。**当前实现数据采集（分组标注）+ 基于本地大模型的双图对比，尚未接入主流程。**
+
+```bash
+python similarity/app.py            # http://127.0.0.1:8901，只绑本机
+```
+
+两个页面，顶部导航互跳：
+
+- **标注采集（`/`）**：**按分组组织**（如「御魂探索」「麒麟」各一个分组，进去各自采集，
+  互不干扰）。分组是**真实目录隔离**不是筛选标签：`dataset/groups.json` 存清单
+  （`key` 是自动生成的 ASCII 短 id，`name` 才是中文名，改名不动目录、URL 里不出现中文，
+  名字全局唯一），`dataset/groups/<key>/shots/<id>.png` + 同名 `<id>.json` 存截图与标注，
+  `thumbs/` 存缩略图缓存。支持新建 / 改名 / 改说明 / 删除（连同组内截图与标注）/
+  把单张截图**跨组移动**（标注与备注一起搬）。首次启动自动建 `default`「默认分组」，
+  并把改造前的旧 `dataset/shots/`、`dataset/thumbs/` **迁移**进去（只移动不删除，幂等）。
+  操作：**捕获截图**（目标窗口 / 整屏）→ 图上**框选或点选标注**（坐标按图片原始像素存，
+  与浏览器缩放无关）→ **保存**。PNG 与缩略图不入版本库（见 `similarity/dataset/.gitignore`
+  的 `*.png` / `*.jpg`），标注 JSON 与 `groups.json` 入库。
+- **图片对比（`/compare`）**：连点两次捕获填入 A / B 两个槽位 → 点「对比」调
+  `POST /api/compare` → 显示可信度、是否同一界面、两边识别成什么、差异列表与依据。
+  截图落 `dataset/compare/`（只留最近 40 张），**不进标注数据集**。
+  **对比算法 = 本地 Ollama 多模态模型判定**（`similarity/llm_judge.py`），默认
+  `lfm3-omni:latest`，两张图 base64 一起发 `POST /api/chat`（`format: json`、
+  `temperature: 0`），单次实测 1.3~2.8 秒。**不做 OpenCV 像素比对。**
+  `score` = 模型的 `similarity`；`matched = same_screen AND score >= 阈值(0.6)`；
+  两者矛盾时 `inconsistent=true`，页面弹黄条。换模型 / 阈值走 `--model` /
+  `--threshold` 或 `YYS_OLLAMA_MODEL` / `YYS_SIMILARITY_THRESHOLD`。
+  ⚠️ 模型必须同时有 `completion` + `vision`：**纯 embedding 模型不行** —— 实测
+  `embeddinggemma-2:740m` 虽然 capabilities 带 vision，但 Ollama `/api/embed` 会
+  **静默丢弃** `images`（三张不同图返回同一向量，cosine=1.000000，0.02s 无视觉编码），
+  且它不支持 generate / chat。`health()` 启动自检会拦住并给出原因。
+  ⚠️ 模型 `similarity` 只分得开两档（同屏 0.99 / 不同屏 0.05），中间地带也给 0.99，
+  所以它能答「是不是同一界面」，**不能当连续相似度度量**。真机 6 对标定 6/6 正确。
+  自检 CLI：`python -m similarity.llm_judge [a.png b.png]`。
+
+细节见 `similarity/README.md`。
+
 ### 事件驱动流程与自适应等待（两条横切能力）
 
 **为什么要它**：以前 `run()` 里写死「等 A → 点 A → 等 B → 点 B」，加一条规则就得改流程本体；
@@ -331,6 +373,7 @@ python -m pytest tests -q
 - `test_state_machine_scheduler.py`：wait_* 的 `scheduler` 参数生效；**不传时 sleep 序列与改造前逐字一致**。
 - `test_shard_entry_nav.py`：碎片**两种入口同时监听**（跑着跑着会变，不是开局选定）：结算后直接回挑战界面就开战、回章节界面就导航 头像->面板->列表行；**watch 顺序**（`detect_first` 顺序优先不看分数，结算模板必须排第一，否则被入口面板遮蔽 —— 真机卡死过近 4 分钟）；**战斗阶段门控**（导航动作只在等挑战按钮的阶段做）；门控挡下的命中不重置状态、改由门控打开的边沿补触发（否则每拍重复 entered 刷爆日志）；导航界面卡住会补点。假游戏里复现了全部四处误命中（含战斗 / 结算画面上的入口面板误命中）。
 - `test_template_scales.py`：尺度可用性的**绝对像素**下限（41×51 @ 0.5 = 20×25 必须不可用，这是真机乱点的根因）；宽模板能扛更小尺度（卡的是短边）；全被筛掉时退回 1.0；默认尺度表不许回到 0.3 那种量级。唯一一个 `importorskip("cv2")` 的用例验证 `_scaled` 用同一个下限。
+- `test_similarity_annotator.py`：`similarity/` 采集与对比工具的存储与 API 契约（假 grabber / 假 judge / 假 comparer，**不截屏、不连 Ollama、不需要 cv2**）：截图落盘 PNG + JSON、前端依赖字段齐全、列表按时间倒序、框 / 点标注保存与回读、越界与非法 kind 被拒、非法 shot id 与路径穿越拦截、删除清理三个文件、缩略图端点、页面与静态资源可访问；**分组**：首次启动自动建 `default` 组、旧 `shots/`+`thumbs/` 迁移进默认组且**幂等**、多组数据物理隔离（跨组读图 / 读标注 404）、组名必填与去重、改名 / 改说明（可只传一个字段）、删除组连目录一起删、删到最后一个组自动重建 `default`、跨组移动截图（标注与备注一起搬、同组移动 400、目标组不存在 404）、非法 group key 与路径穿越拦截；**对比页**：两次捕获落 `compare/` 且不污染标注数据集、模型判定结果透传前端字段、否定判定、缺槽位 400、图不存在 404、非法 id 400、注入 comparer 时按传入路径调用、抛异常 / 返回非 dict 转 500、模型不可用转 503 且 `/api/info` 标记 `model.ok=false`；**模型客户端**：JSON 解析 / 代码块围栏 / JSON 前后夹带文字（`raw_decode`）/ 截断输出按字段抢救、数值越界夹到 0~1、`same_screen` 字符串转布尔、阈值与 `inconsistent` 判定、空内容与不可解析输出报错、图片缺失 / 过大报错、`health()` 四种失败态（连不上 / 模型不存在 / 无 vision / 纯 embedding 无 completion）与 omni 模型通过。
 
 新增状态或流程时，至少保证 `test_states_registry.py` 通过（它会检查模板文件是否存在）。
 

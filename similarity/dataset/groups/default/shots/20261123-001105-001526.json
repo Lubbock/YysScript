@@ -1,0 +1,22 @@
+{
+  "id": "20261123-001105-001526",
+  "image": "20261123-001105-001526.png",
+  "captured_at": "2026-11-23 00:11:05",
+  "annotations": [],
+  "note": "",
+  "source": "window",
+  "width": 690,
+  "height": 356,
+  "origin": [
+    25,
+    225
+  ],
+  "region": [
+    25,
+    225,
+    690,
+    356
+  ],
+  "window_id": 267290,
+  "process": "iPhone Mirroring"
+}

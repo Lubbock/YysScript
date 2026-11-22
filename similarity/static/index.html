@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>相似度数据采集</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>相似度数据采集<small id="hdr-sub">加载中…</small></h1>
+  <nav class="nav">
+    <a href="/" class="on">标注采集</a>
+    <a href="/compare">图片对比</a>
+  </nav>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="toolbar">
+  <label class="field">来源
+    <select id="source">
+      <option value="window">目标窗口（模拟器 / 镜像）</option>
+      <option value="fullscreen">整屏</option>
+    </select>
+  </label>
+  <label class="field">进程名
+    <input type="text" id="process" size="16" placeholder="iPhone Mirroring">
+  </label>
+  <button id="btn-capture" class="primary">📷 捕获截图</button>
+  <button id="btn-refresh">↻ 刷新列表</button>
+  <span class="spacer"></span>
+  <div class="seg">
+    <button id="mode-box" class="seg-btn on" title="拖动框选一个区域（快捷键 B）">▭ 框选</button>
+    <button id="mode-point" class="seg-btn" title="点击标注一个点（快捷键 P）">• 点标注</button>
+  </div>
+  <label class="check"><input type="checkbox" id="zoom-1to1"> 1:1 显示</label>
+  <button id="btn-save" class="primary" disabled>💾 保存标注</button>
+</div>
+
+<div class="groupbar">
+  <span class="groupbar-label">当前分组</span>
+  <select id="group-select"></select>
+  <button id="btn-group-new" class="primary">＋ 新建分组</button>
+  <button id="btn-group-edit" title="改名 / 改说明">✎ 编辑</button>
+  <button id="btn-group-del" class="danger" title="删除分组（含其中全部截图与标注）">🗑 删除</button>
+  <span class="spacer"></span>
+  <span class="group-desc" id="group-desc"></span>
+</div>
+
+<main>
+  <aside class="side left">
+    <div class="side-head">截图列表 <b id="shot-count">0</b></div>
+    <div id="shot-list" class="shot-list"></div>
+  </aside>
+
+  <section class="stage-col">
+    <div id="stage-empty" class="empty">加载中…</div>
+    <div id="stage" class="stage hidden">
+      <div class="stage-inner">
+        <img id="shot-img" alt="截图" draggable="false">
+        <svg id="overlay" preserveAspectRatio="xMinYMin meet"></svg>
+      </div>
+    </div>
+    <div class="stage-tools hidden" id="stage-tools">
+      <span>把当前截图移到</span>
+      <select id="move-target"></select>
+      <button id="btn-move">移动</button>
+    </div>
+    <div class="stage-foot" id="stage-foot"></div>
+  </section>
+
+  <aside class="side right">
+    <div class="side-head">标注 <b id="ann-count">0</b><span class="hint" id="dirty-hint"></span></div>
+    <div id="ann-list" class="ann-list"></div>
+    <div class="note-box">
+      <div class="side-head">截图备注</div>
+      <textarea id="note" rows="3" placeholder="这一屏是什么界面、什么条件下采集的…"></textarea>
+    </div>
+  </aside>
+</main>
+
+<div id="toast"></div>
+
+<div id="modal-root" class="modal-root hidden">
+  <div class="modal">
+    <div class="modal-head">
+      <b id="modal-title">新建分组</b>
+      <span class="spacer"></span>
+      <button id="modal-close">✕</button>
+    </div>
+    <label class="modal-field">分组名
+      <input type="text" id="modal-name" maxlength="40" placeholder="如 御魂探索 / 麒麟">
+    </label>
+    <label class="modal-field">说明（可选）
+      <input type="text" id="modal-desc" maxlength="200" placeholder="这个分组采集什么界面">
+    </label>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button id="modal-cancel">取消</button>
+      <button id="modal-ok" class="primary">确定</button>
+    </div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
