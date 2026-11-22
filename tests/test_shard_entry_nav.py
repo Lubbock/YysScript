@@ -10,18 +10,20 @@
 剧本（假游戏）：
     挑战界面 --点挑战--> 战斗(30s) --时间到--> 结算界面
     结算 --点结算--> 按 script 决定回「挑战界面」还是「章节界面」
-    章节界面 --点头像--> 入口面板 --点面板--> 列表行 --点行--> 挑战界面
 
-四处模板误命中都在假游戏里复现（行为都是真机上真实发生过的）：
-- 挑战界面上「碎片列表行」「碎片入口面板」都会命中；
-- 战斗画面上「碎片入口面板」「挑战按钮」都会命中（真机照着点到了右上角）；
-- 结算画面上「碎片入口面板」也会命中（把结算识别遮死，卡了近 4 分钟）；
-- 列表行界面上「章节 Boss 头像」也会命中（行里含同一个头像）。
+完整链条是**四屏**（第十八章真机量的，2026-11-21）：
+    章节界面 --点紫色Boss头像--> 副本界面 --点「式神碎片」入口条--> 选择式神界面
+    --点「头像+等级」那一行--> 挑战界面 --点菱形挑战按钮--> 战斗 --> 结算
 
-`detect_first` 是**顺序优先而不是分数优先**，所以 watch 顺序是主要防线：
-结算画面 > 挑战按钮 > 列表行 > 入口面板 > Boss 头像。结算模板必须排第一，否则会被
-入口面板的误命中永久遮蔽（真机因此卡死近 4 分钟点不掉结算）。战斗画面那处另靠
-**阶段门控**兜住：只在 BattleCycle 等挑战按钮时才允许导航动作。
+难点在于**同屏多个模板同时达标**，而 `detect_first` 是顺序优先、不看分数：
+- 选择式神屏：列表行 0.978 / 挑战按钮 0.999 / 入口条 0.928 三者都达标 ——
+  必须让列表行赢，否则跳过选式神直接打默认式神（用户报的「没串起来」）；
+- 真挑战界面：列表行掉到 0.799、入口条 0.927，都低于各自阈值，只剩挑战按钮达标；
+- 结算画面：入口条也命中 —— 结算模板不排第一就会被永久遮蔽（真机卡死近 4 分钟）；
+- 战斗画面：入口条也命中（真机照着点到了右上角），靠**阶段门控**兜住。
+
+所以 watch 顺序 = 结算画面 > 列表行 > 挑战按钮 > 入口条 > Boss 头像，
+再叠加「选中后列表行分数会掉」这个阈值判据（0.9）和战斗阶段门控。
 
 不截屏不点击：machine 与 controller 都是假的，时钟也是假的。
 """
@@ -64,17 +66,23 @@ def make_match(state) -> Match:
 class FakeShardGame:
     """假游戏：识别看 self.screen，点击按模板切换界面。"""
 
-    #: 每个界面上能匹配到的状态。四处误命中是故意留下的（见模块 docstring）
+    #: 每个界面上**过了自己阈值**的状态。三处跨界面命中是故意留下的（见模块 docstring）
     SCREENS = {
-        # 挑战界面：列表行误命中 0.791、入口面板误命中 0.925（都超过默认阈值）
-        "challenge": (SHARD_CHALLENGE, SHARD_FRAGMENT_ROW, SHARD_FRAGMENT_ENTRY),
-        # 战斗画面：入口面板误命中 0.845~0.895
+        # 真挑战界面：式神已选中，列表行掉到 0.799 < 阈值 0.9、入口条 0.927 < 阈值 0.95，
+        # 所以这里只有挑战按钮达标
+        "challenge": (SHARD_CHALLENGE,),
+        # 战斗画面：入口条仍会命中（旧模板实测 0.845~0.895；新模板未量，但门控与阈值
+        # 无关，这一屏必须继续测）
         "battle": (SHARD_FRAGMENT_ENTRY,),
-        # 结算画面：入口面板误命中 0.85 —— 排序不对就会永久遮蔽结算识别
+        # 结算画面：入口条也命中 —— 排序不对就会永久遮蔽结算识别
         "end": (SHARD_BATTLE_END, SHARD_FRAGMENT_ENTRY),
+        # 探索章节界面：只有紫色 Boss 头像达标
         "chapter": (SHARD_CHAPTER_BOSS,),
-        "entry": (SHARD_FRAGMENT_ENTRY,),
-        "row": (SHARD_FRAGMENT_ROW, SHARD_CHAPTER_BOSS),      # 行里含同一个头像
+        # 副本界面（点完头像）：只有入口条达标
+        "dungeon": (SHARD_FRAGMENT_ENTRY,),
+        # 选择式神屏（点完入口条）：列表行 / 挑战按钮 / 入口条 **三者同时达标**
+        # （真机实测 0.978 / 0.999 / 0.928）—— 必须先选式神，所以列表行要赢
+        "select": (SHARD_FRAGMENT_ROW, SHARD_CHALLENGE, SHARD_FRAGMENT_ENTRY),
     }
 
     def __init__(self, clock, battle_seconds: float = 30.0,
@@ -123,9 +131,9 @@ class FakeShardGame:
         elif template == SHARD_BATTLE_END.template:
             self.screen = self.next_screen_after_end()
         elif template == SHARD_CHAPTER_BOSS.template:
-            self.screen = "entry"
+            self.screen = "dungeon"
         elif template == SHARD_FRAGMENT_ENTRY.template:
-            self.screen = "row"
+            self.screen = "select"
         elif template == SHARD_FRAGMENT_ROW.template:
             self.screen = "challenge"
         return getattr(target, "center", None)
@@ -211,8 +219,8 @@ def test_settlement_back_to_chapter_navigates(clock, store):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("start,expected_prefix", [
     ("chapter", [BOSS, ENTRY, ROW]),
-    ("entry", [ENTRY, ROW]),
-    ("row", [ROW]),
+    ("dungeon", [ENTRY, ROW]),
+    ("select", [ROW]),
     ("challenge", []),
 ])
 def test_starts_from_any_screen(clock, store, start, expected_prefix):
@@ -227,12 +235,31 @@ def test_starts_from_any_screen(clock, store, start, expected_prefix):
 
 
 # --------------------------------------------------------------------------- #
-# watch 顺序：两处已知的模板误命中
+# watch 顺序：同屏多个模板达标时该点谁
 # --------------------------------------------------------------------------- #
-def test_challenge_screen_prefers_challenge_over_row_false_positive(clock, store):
-    """挑战界面上列表行模板也会命中（实测 0.791），必须让挑战按钮赢。
+def test_select_screen_prefers_row_over_challenge_button(clock, store):
+    """选择式神屏上列表行 / 挑战按钮 / 入口条同时达标，必须取列表行。
 
-    这条是真机踩过的坑：顺序反了会在挑战界面上去点列表行，整轮走偏。
+    真机实测 0.978 / 0.999 / 0.928。`detect_first` 是顺序优先不看分数的，
+    所以哪怕挑战按钮分数更高，也必须让列表行排前面 —— 否则脚本会跳过选式神，
+    直接打默认式神（用户报的「执行着执行着没串起来」就是这个）。
+    """
+    game = FakeShardGame(clock)
+    game.screen = "select"
+    engine = make_flow(game, clock, store, times=1).create_engine()
+    ShardEntryNav(engine).attach()
+
+    detection = engine.observe()
+
+    assert detection is not None
+    assert detection.state is SHARD_FRAGMENT_ROW
+
+
+def test_challenge_screen_after_selected_only_matches_challenge(clock, store):
+    """选中式神之后的真挑战界面上只有挑战按钮达标，可以直接开战。
+
+    列表行选中后掉到 0.799（阈值 0.9）、入口条 0.927（阈值 0.95），
+    所以「列表行排在挑战按钮前」不会反过来卡住正常挑战。
     """
     game = FakeShardGame(clock)
     game.screen = "challenge"
@@ -245,21 +272,8 @@ def test_challenge_screen_prefers_challenge_over_row_false_positive(clock, store
     assert detection.state is SHARD_CHALLENGE
 
 
-def test_row_screen_prefers_row_over_boss_portrait(clock, store):
-    """列表行界面上两个模板都命中时，必须取更具体的列表行。"""
-    game = FakeShardGame(clock)
-    game.screen = "row"
-    engine = make_flow(game, clock, store, times=1).create_engine()
-    ShardEntryNav(engine).attach()
-
-    detection = engine.observe()
-
-    assert detection is not None
-    assert detection.state is SHARD_FRAGMENT_ROW
-
-
 def test_watch_order_is_stable_after_battle_cycle_attaches(clock, store):
-    """两个订阅方都 watch 之后，优先级顺序仍然是 挑战 > 列表行 > 面板 > 头像。"""
+    """两个订阅方都 watch 之后，优先级顺序仍是 结算 > 列表行 > 挑战按钮 > 入口条 > 头像。"""
     game = FakeShardGame(clock)
     game.screen = "challenge"
     flow = make_flow(game, clock, store, times=1)
@@ -267,10 +281,9 @@ def test_watch_order_is_stable_after_battle_cycle_attaches(clock, store):
     ShardEntryNav(engine).attach()
     keys = [getattr(state, "key", state) for state in engine.watched]
 
-    assert keys.index(SHARD_BATTLE_END.key) < keys.index(SHARD_CHALLENGE.key)
-    assert keys.index(SHARD_CHALLENGE.key) < keys.index(SHARD_FRAGMENT_ROW.key)
-    assert keys.index(SHARD_FRAGMENT_ROW.key) < keys.index(SHARD_FRAGMENT_ENTRY.key)
-    assert keys.index(SHARD_FRAGMENT_ENTRY.key) < keys.index(SHARD_CHAPTER_BOSS.key)
+    order = [SHARD_BATTLE_END, SHARD_FRAGMENT_ROW, SHARD_CHALLENGE,
+             SHARD_FRAGMENT_ENTRY, SHARD_CHAPTER_BOSS]
+    assert keys == [state.key for state in order], keys
     assert engine.observe().state is SHARD_CHALLENGE
 
 
@@ -419,21 +432,28 @@ def test_battle_false_positive_fires_entered_once_not_every_poll(clock, store):
     assert len(seen) == 2
 
 
-def test_thresholds_match_the_recropped_templates():
-    """阈值卡在重裁模板后的实测矩阵之间（尺度 1.0~0.4、下限 24px）。
+def test_thresholds_match_the_measured_matrix():
+    """阈值卡在真机实测矩阵的噪声与真命中之间（尺度 1.0~0.4、下限 24px）。
 
-    模板用探针法按当前窗口比例从实时截屏重裁（章节头像 30x30 / 入口条 111x41）：
-      章节界面：头像 0.986 / 入口条 0.774 / 挑战按钮 0.479
-      副本界面：入口条 1.000 / 挑战按钮 0.749 / 头像 0.436
-      挑战界面：挑战按钮 0.999 / 入口条 0.895 / 头像 0.468
+    模板用探针法按当前窗口比例从实时截屏重裁（章节头像 30x30 / 入口条 111x41）；
+    列表行 308x86 本来就是对的，只是我先前误判「这屏不存在」。
+    同一屏点击式神行前后各量一次，才拿到「选中」这个判据：
+      选择式神屏：列表行 0.978 / 挑战按钮 0.999 / 入口条 0.928 / 头像 0.504
+      点完行之后：列表行 0.799 / 挑战按钮 0.999 / 入口条 0.927 / 头像 0.592
+      章节界面：  头像 0.986 / 入口条 0.806 / 列表行 0.541 / 挑战按钮 0.558
+      副本界面：  入口条 1.000 / 挑战按钮 0.749 / 列表行 0.511
     注：更早记录的 0.925 / 0.845 / 0.721 那批是旧尺度表试到 0.3 的缩小匹配噪声
     （命中框 20×26、67×25 像素），尺度收紧后不再复现，别拿它们当依据。
     """
-    assert SHARD_CHALLENGE.threshold < 0.999, "挑战界面真命中，别抬到识别不到"
+    assert SHARD_CHALLENGE.threshold < 0.999, "挑战按钮真命中，别抬到识别不到"
     assert SHARD_CHALLENGE.threshold > 0.749, "副本界面上挑战按钮的实测噪声 0.749"
-    assert SHARD_FRAGMENT_ENTRY.threshold > 0.895, "挑战界面上入口条的实测噪声 0.895"
-    assert SHARD_FRAGMENT_ENTRY.threshold < 1.000, "副本界面上入口条的真命中 1.000"
-    assert 0.468 < SHARD_CHAPTER_BOSS.threshold < 0.986, "头像：挑战界面 0.468 / 章节界面 0.986"
+    # 列表行：未选中 0.978 要达标、已选中 0.799 不能达标 —— 这就是「该选式神」的判据
+    assert SHARD_FRAGMENT_ROW.threshold > 0.799, "选中式神后不该再被认成「还要选」"
+    assert SHARD_FRAGMENT_ROW.threshold < 0.978, "未选中时必须达标"
+    # 入口条：真命中 1.000，挑战/选择屏上 0.927~0.928 不能达标
+    assert SHARD_FRAGMENT_ENTRY.threshold > 0.928, "挑战界面上入口条的实测噪声"
+    assert SHARD_FRAGMENT_ENTRY.threshold < 1.000
+    assert 0.592 < SHARD_CHAPTER_BOSS.threshold < 0.986, "头像：副本后 0.592 / 章节 0.986"
 
 
 # --------------------------------------------------------------------------- #
