@@ -1,33 +1,20 @@
 # YysScript 运行依赖
-#
-# 旧 requirements.txt 是 conda 在 macOS 上自动导出的（一屏 pyobjc），
-# 而代码实际跑在 Windows + OpenCV + pyautogui 上，且核心依赖一个都没列。
-# 这里按「核心 / 可选」重新整理。
 
 # ---------------------------------------------------------------- 核心（必装）
-opencv-python>=4.5.0
+opencv-python>=4.5.0        # 截屏后处理与 runner/gfx.py 的图形算法
 numpy>=1.21.0
-PyAutoGUI>=0.9.53
-Pillow>=9.0.0
+PyAutoGUI>=0.9.53           # 截屏与点击
+Pillow>=9.0.0               # 标注页缩略图
 
-# Windows 客户端定位游戏窗口用（actions/window.py）
+# macOS 定位镜像窗口与拟人化点击（actions/window.py、actions/mouse.py、vision/capture.py）
+pyobjc-framework-Quartz>=10 ; sys_platform == 'darwin'
+pyobjc-framework-Cocoa>=10 ; sys_platform == 'darwin'
+
+# Windows 定位 PC 客户端窗口（actions/window.py）
 pywin32>=302 ; sys_platform == 'win32'
 
-# ---------------------------------------------------------------- 可选（按需）
-# 调试绘图：storage 里的耗时曲线
-matplotlib>=3.5.0
-
-# tools/file_server、tools/web 的 Flask demo
+# 标注采集 / 双图对比 Web 界面（similarity/app.py）
 flask>=2.0.0
 
-# tools/pyqt 的 GUI 骨架
-PyQt5>=5.15.0
-
-# tools/android 的安卓 / 模拟器方案
-uiautomator2>=2.16.0
-
-# tools/ml 里的 CNN 示例（TensorFlow 1.x API，仅作演示，不参与主流程）
-# tensorflow==1.15.5
-
-# tools/audio 的录音脚本
-# PyAudio>=0.2.11
+# 模型判定不需要 Python 依赖：走本地 Ollama 的 HTTP 接口（标准库 urllib）。
+# 模型本身要另外拉取：ollama pull lfm3-omni:latest

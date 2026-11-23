@@ -3,7 +3,7 @@ import pytest
 
 from actions.viewport import Viewport
 from config import settings
-from config.coordinates import Point, bottom_menu, breakthrough_cell
+from config.coordinates import Point
 
 
 def test_same_size_window_maps_one_to_one():
@@ -30,7 +30,7 @@ def test_non_uniform_scaling():
 def test_round_trip_conversion():
     """逻辑 -> 屏幕 -> 逻辑 应该回到原点（允许 1 像素取整误差）。"""
     vp = Viewport(origin=(123, 456), size=(1366, 768))
-    for point in [Point(0, 0), Point(1023, 767), bottom_menu(2), breakthrough_cell(5)]:
+    for point in [Point(0, 0), Point(1023, 767), Point(512, 384), Point(7, 759)]:
         back = vp.to_logical(vp.to_screen(point))
         assert abs(back.x - point.x) <= 1
         assert abs(back.y - point.y) <= 1
@@ -59,25 +59,6 @@ def test_region_matches_window_rect():
 def test_scale_size():
     vp = Viewport(origin=(0, 0), size=(2048, 1536))
     assert vp.scale_size(100, 50) == (200, 100)
-
-
-@pytest.mark.parametrize("index,expected", [
-    (1, (275, 198)),
-    (3, (867, 198)),
-    (5, (576, 319)),
-    (7, (275, 436)),
-    (9, (867, 436)),
-])
-def test_breakthrough_cell_layout(index, expected):
-    """九宫格索引换算：修掉旧代码 math.ceil + 取模 算错行的 bug。"""
-    assert tuple(breakthrough_cell(index)) == expected
-
-
-def test_breakthrough_cell_rejects_bad_index():
-    with pytest.raises(ValueError):
-        breakthrough_cell(0)
-    with pytest.raises(ValueError):
-        breakthrough_cell(10)
 
 
 def test_invalid_viewport_size():

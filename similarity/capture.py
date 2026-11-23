@@ -94,10 +94,7 @@ def grab(source: str = "window", process: Optional[str] = None) -> Shot:
             "或改用{}。".format(name or process, hint)
         )
 
-    capture = ScreenCapture(
-        region_provider=lambda: rect.region,
-        window_id_provider=lambda: rect.wid,
-    )
+    capture = ScreenCapture(region_provider=lambda: rect.region)
     frame = capture.grab()
     ok, buffer = cv2.imencode(".png", frame.image)
     if not ok:

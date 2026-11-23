@@ -1,9 +1,9 @@
-"""图像识别的公共数据结构。
+"""截屏结果的数据结构。
 
 坐标语义约定（全项目统一）：
-- Frame.origin / Box / Match 里的坐标都是**屏幕绝对坐标**；
+- Frame.origin 与标注像素是两套不同基准，见 AGENTS.md 第 4 节；
 - config.coordinates.Point 是**基准客户区逻辑坐标**；
-- 两者互转由 actions.viewport.Viewport 负责。
+- 互转由 actions.viewport.Viewport（逻辑↔屏幕）与 runner.session.Session（标注像素↔逻辑）负责。
 """
 from __future__ import annotations
 
@@ -28,42 +28,3 @@ class Frame:
         """把截图内的局部坐标换算成屏幕绝对坐标。"""
         return self.origin[0] + x, self.origin[1] + y
 
-
-@dataclass(frozen=True)
-class Box:
-    """屏幕绝对坐标下的矩形区域。"""
-
-    x: int
-    y: int
-    w: int
-    h: int
-
-    @property
-    def center(self) -> Tuple[int, int]:
-        return self.x + self.w // 2, self.y + self.h // 2
-
-    @property
-    def bottom_right(self) -> Tuple[int, int]:
-        """旧 MapCv.location_screen 返回的就是这个点，保留以便复现旧行为。"""
-        return self.x + self.w, self.y + self.h
-
-    @property
-    def area(self) -> int:
-        return self.w * self.h
-
-
-@dataclass(frozen=True)
-class Match:
-    """一次模板匹配命中。"""
-
-    box: Box
-    score: float
-    template: str
-
-    @property
-    def center(self) -> Tuple[int, int]:
-        return self.box.center
-
-    @property
-    def bottom_right(self) -> Tuple[int, int]:
-        return self.box.bottom_right

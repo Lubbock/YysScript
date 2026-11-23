@@ -1,0 +1,34 @@
+{
+  "id": "20261123-025951-818093",
+  "image": "20261123-025951-818093.png",
+  "captured_at": "2026-11-23 02:59:51",
+  "annotations": [
+    {
+      "id": "axlxindky",
+      "kind": "point",
+      "label": "挑战",
+      "point": {
+        "x": 598,
+        "y": 306
+      }
+    }
+  ],
+  "note": "",
+  "source": "window",
+  "width": 690,
+  "height": 356,
+  "origin": [
+    189,
+    251
+  ],
+  "region": [
+    189,
+    251,
+    690,
+    356
+  ],
+  "window_id": 87,
+  "process": "iPhone Mirroring",
+  "group": "g20261123-025948-b825",
+  "updated_at": "2026-11-23 03:00:06"
+}

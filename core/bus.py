@@ -1,16 +1,14 @@
 """通用消息总线：进程内同步发布 / 订阅。
 
-为什么要有它：flows 以前把「识别到 A 就点 A，然后等 B」写死在 run() 里，
-状态与动作是硬编码的链条，加一条规则就得改流程本体。改成总线之后：
-
     识别到状态  ->  bus.publish("state.entered.SOUL_CHALLENGE", event)
     订阅方      ->  自己决定点哪里 / 记什么计时 / 是否结束本轮
 
-流程主体（flows/engine.py）只负责推进与广播，业务规则都变成可插拔的订阅方。
+流程主体只负责推进与广播，业务规则写成可插拔的订阅方。
+当前 runner 不用总线（界面顺序属于分组 DSL）；CycleTimer 的可选 bus 参数走它。
 
 设计约束（照 AGENTS.md 的分层）：
-- 本模块是 core 层的通用能力，**只依赖标准库**，不 import states / vision /
-  actions / flows，也不认识任何领域事件；
+- 本模块是 core 层的通用能力，**只依赖标准库**，不 import 任何业务层，
+  也不认识任何领域事件；
 - 同步投递：publish 返回时所有订阅方都已执行完。自动化脚本是单线程的，
   同步语义让「点击 -> 等界面」的顺序可推理，也不会丢事件；
 - 异常隔离：默认一个订阅方抛错只记日志，不让它把整条流程带崩
@@ -18,7 +16,7 @@
 - 递归保护：订阅方里再 publish 是允许的，但深度超过上限就丢弃并记错误日志，
   避免两个订阅方互相触发导致无限递归。
 
-topic 命名约定（点分层级，领域定义在 flows/signals.py）：
+topic 命名约定（点分层级，旧领域的定义在 archive/flows/signals.py）：
     "flow.started" / "round.finished" / "state.entered.SOUL_CHALLENGE"
 
 订阅 topic 支持通配符，按 `.` 分段匹配：

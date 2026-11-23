@@ -1,10 +1,5 @@
-"""动作耗时样本存取。
+"""耗时样本存取：表 `GAMETIME_RECORD`，写入后按上限裁剪。"""
 
-对应旧 utils/grayscaness.py（SqlScan）。修掉三处问题：
-1. 全部 SQL 字符串拼接 -> 参数化查询；
-2. clear_kw(500) 少传参数必然 TypeError -> trim(key, keep)；
-3. 裁剪逻辑写反（超限后直接 return，样本永远不写入）-> 先写入再裁剪。
-"""
 from __future__ import annotations
 
 from typing import List, Optional

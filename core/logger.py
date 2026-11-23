@@ -1,8 +1,6 @@
-"""日志。
+"""日志：控制台 + `var/logs/yys_script.log`（5MB 轮转）。
 
-修掉旧 utils/Logger.py 的两个问题：
-1. 日志路径写死成 E:\\github\\YysScript\\test.log；
-2. 每次 Logger() 都 addHandler，导致同一条日志重复输出。
+handler 全局只挂一次，避免重复输出。
 """
 from __future__ import annotations
 
@@ -17,6 +15,7 @@ _FORMAT = "[%(asctime)s] %(name)s %(filename)s:%(lineno)d [%(levelname)s] %(mess
 _MAX_BYTES = 5 * 1024 * 1024
 _BACKUP_COUNT = 3
 _configured = False
+_NOISY_LOGGERS = ("PIL", "urllib3", "requests", "httpx", "asyncio")
 
 
 def _configure_root() -> None:
@@ -48,6 +47,9 @@ def _configure_root() -> None:
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
+
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.INFO)
 
     _configured = True
 

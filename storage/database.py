@@ -1,8 +1,5 @@
-"""数据库连接与建表。
+"""数据库连接与建表。路径来自 settings.DB_PATH（YYS_DB_PATH 可覆盖）。"""
 
-路径来自 config.settings.DB_PATH（可用环境变量 YYS_DB_PATH 覆盖），
-不再像旧代码那样在进程当前目录随意生成 gray_scan.db。
-"""
 from __future__ import annotations
 
 import sqlite3

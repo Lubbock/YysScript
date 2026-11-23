@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from config import settings
 
@@ -21,6 +21,8 @@ PROMPT = """第一张图是 A，第二张图是 B，都是手机截图。判断�
 MAX_IMAGE_BYTES = 30 * 1024 * 1024
 TEXT_LIMITS = {"a_summary": 80, "b_summary": 80, "reason": 200}
 DIFF_LIMIT = 40
+
+ImageSource = Union[Path, str, bytes, bytearray]
 
 
 class JudgeError(Exception):
@@ -199,19 +201,25 @@ class OmniJudge:
         info["ok"] = True
         return info
 
-    def _encode(self, path: Path) -> str:
-        try:
-            data = Path(path).read_bytes()
-        except OSError as exc:
-            raise JudgeError("读取图片失败 {}: {}".format(path, exc))
+    def _encode(self, image: ImageSource) -> str:
+        """把图片编码成 base64，入参可以是路径或 PNG 字节。"""
+        if isinstance(image, (bytes, bytearray)):
+            data = bytes(image)
+            name = "<内存图片 {} 字节>".format(len(data))
+        else:
+            name = str(image)
+            try:
+                data = Path(image).read_bytes()
+            except OSError as exc:
+                raise JudgeError("读取图片失败 {}: {}".format(name, exc))
         if not data:
-            raise JudgeError("图片为空: {}".format(path))
+            raise JudgeError("图片为空: {}".format(name))
         if len(data) > MAX_IMAGE_BYTES:
             raise JudgeError("图片过大（{:.1f} MB），上限 {} MB".format(
                 len(data) / 1048576, MAX_IMAGE_BYTES // 1048576))
         return base64.b64encode(data).decode("ascii")
 
-    def judge(self, image_a: Path, image_b: Path) -> Dict[str, Any]:
+    def judge(self, image_a: ImageSource, image_b: ImageSource) -> Dict[str, Any]:
         """让模型判定两张图，返回原始字段。"""
         payload = {
             "model": self.model,
@@ -262,7 +270,7 @@ class OmniJudge:
             "done_reason": body.get("done_reason"),
         }
 
-    def compare(self, image_a: Path, image_b: Path) -> Dict[str, Any]:
+    def compare(self, image_a: ImageSource, image_b: ImageSource) -> Dict[str, Any]:
         """判定并组装成对比接口契约。"""
         verdict = self.judge(image_a, image_b)
         score = verdict["similarity"]

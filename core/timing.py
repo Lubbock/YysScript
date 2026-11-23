@@ -2,14 +2,12 @@
 
 要解决的问题
 ------------
-以前的流程「点一下 → sleep 固定秒数 → 轮询识图」，一整轮花了多少时间从来没被记住：
-- 御魂一轮实际 45 秒，代码却按 `BATTLE_INTERVAL = 3.0` 一直截屏识图，
-  绝大部分时间都在做无用的空等 + 重复截图；
-- 只有 `event-aj8fer` 用 `core/stopwatch.py` 的均值预测过等待时间，别处没有。
+每轮实际花了多少时间如果不被记住，就只能按固定间隔反复截屏：
+一场 45 秒的战斗要截十几次图，绝大多数注定什么都识别不到。
 
 本模块提供两件事：
 
-1. **计时**：`CycleTimer.cycle("soul:battle")` 记录一个阶段/一整轮的真实耗时，
+1. **计时**：`CycleTimer.cycle("御魂十一:战斗")` 记录一个阶段/一整轮的真实耗时，
    样本写进 `storage.DurationStore`（沿用 `GAMETIME_RECORD` 表，老 gray_scan.db 直接可用）；
 2. **自适应等待**：`plan(key, timeout, interval)` 返回 `WaitPlan(blind_wait, interval)`：
    先「盲等」blind_wait 秒（这期间**完全不截屏**），之后用更细的 interval 轮询识图。
@@ -33,12 +31,11 @@
    （至少留 `TIMING_FINE_WINDOW` 秒给细粒度轮询），估计再离谱也不会长时间瞎等。
 
 样本不足（`usable < TIMING_WARMUP_SAMPLES`）时 `blind_wait = 0`、interval 用调用方
-传进来的值 —— 也就是**完全等于改造前的行为**。所以新流程第一次跑仍然是老频率截图，
-边跑边攒样本，之后自动收敛，不需要人工标定。
+传进来的值 —— 第一次跑按固定频率截图，边跑边攒样本，之后自动收敛，不需要人工标定。
 
 依赖方向：core 层，只依赖 config / storage / core.bus，不认识任何 flow 或 state。
-key 约定 `"<flow>:<phase>"`，例如 `soul:round` / `soul:battle` / `soul:probe`
-（`probe` 是「一次截屏 + 模板匹配」的成本，只在内存里滑动平均，不入库）。
+runner 的 key 约定 `"<分组名>:<步骤名>"`，例如 `御魂十一:round` / `御魂十一:挑战`
+（`probe` 是「一次截屏 + 模型判定」的成本，只在内存里滑动平均，不入库）。
 """
 from __future__ import annotations
 
@@ -144,7 +141,7 @@ class WaitScheduler(Protocol):
 
 
 class FixedScheduler:
-    """永远返回「不盲等 + 调用方给的间隔」，即改造前的行为。
+    """永远返回「不盲等 + 调用方给的间隔」。
 
     用途：`--no-adaptive-wait` / `YYS_ADAPTIVE_WAIT=0`，以及单测里的对照组。
     """
@@ -191,9 +188,9 @@ class CycleTimer:
 
     典型用法：
         timer = CycleTimer()
-        with timer.cycle("soul:battle"):
+        with timer.cycle("御魂十一:战斗"):
             ...打一场...
-        plan = timer.plan("soul:battle", timeout=300.0, interval=3.0)
+        plan = timer.plan("御魂十一:战斗", timeout=300.0, interval=3.0)
         sleep(plan.blind_wait)          # 这段时间不截屏
         while not 命中: sleep(plan.interval)
 

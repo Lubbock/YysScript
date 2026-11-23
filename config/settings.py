@@ -1,7 +1,7 @@
 """全局配置。
 
 所有可调参数集中在本文件，禁止在其他模块写死路径 / 分辨率 / 阈值。
-路径类配置支持环境变量覆盖，方便在不同机器上部署（旧代码把 E:\\github 写死在源码里）。
+路径类配置支持环境变量覆盖，方便在不同机器上部署。
 """
 from __future__ import annotations
 
@@ -21,8 +21,6 @@ def _path(env_key: str, default: Path) -> Path:
     return Path(raw).expanduser() if raw else default
 
 
-ASSETS_DIR: Path = _path("YYS_ASSETS_DIR", PROJECT_ROOT / "assets")
-TEMPLATE_DIR: Path = _path("YYS_TEMPLATE_DIR", ASSETS_DIR / "templates")
 VAR_DIR: Path = _path("YYS_VAR_DIR", PROJECT_ROOT / "var")
 LOG_DIR: Path = _path("YYS_LOG_DIR", VAR_DIR / "logs")
 LOG_FILE: Path = LOG_DIR / "yys_script.log"
@@ -42,15 +40,10 @@ def ensure_dirs() -> None:
 # --------------------------------------------------------------------------- #
 # 分辨率与窗口
 # --------------------------------------------------------------------------- #
-#: 基准客户区分辨率。config/coordinates.py 里的所有逻辑坐标都基于这个尺寸，
+#: 基准客户区分辨率。逻辑坐标 `config.coordinates.Point` 基于这个尺寸，
 #: 运行时由 actions/viewport.py 换算到真实窗口。
 BASE_CLIENT_SIZE: Tuple[int, int] = (1024, 768)
 
-#: 旧脚本做颜色检测时的截屏基准分辨率（Monster 里 resize(640,400) 后再 *2 的来源）。
-BASE_SCREEN_SIZE: Tuple[int, int] = (1280, 800)
-
-#: 颜色检测时的缩放尺寸。缩小后处理，速度显著快于全图模板匹配。
-DETECT_SIZE: Tuple[int, int] = (640, 400)
 
 #: Windows 上游戏窗口的标题 / 类名，用于定位窗口。
 GAME_WINDOW_TITLE: str = "阴阳师-网易游戏"
@@ -70,7 +63,7 @@ CALIBRATION_OFFSET: Tuple[int, int] = (0, 0)
 
 #: 激活目标窗口的最大尝试次数（含首次）。macOS 礼貌点击必须先把镜像 / 游戏窗口
 #: 置前，而单次激活失败很常见 —— 用户正好在切窗口、系统刚从休眠唤醒、
-#: osascript 偶发超时。以前失败就直接抛异常终止进程，现在自动重试。
+#: osascript 偶发超时，这些都是瞬时的，所以自动重试。
 ACTIVATE_MAX_ATTEMPTS: int = 3
 #: 每次激活后等待「真的成为前台」的超时（秒）
 ACTIVATE_WAIT_TIMEOUT: float = 1.5
@@ -81,67 +74,26 @@ ACTIVATE_RETRY_PAUSE: float = 0.5
 ACTIVATE_MAX_CONSECUTIVE_FAILURES: int = 10
 
 
-# --------------------------------------------------------------------------- #
-# 图像识别
-# --------------------------------------------------------------------------- #
-#: 模板匹配默认阈值（TM_CCOEFF_NORMED）
-DEFAULT_THRESHOLD: float = 0.70
-#: 需要高精度定位时使用的阈值（例如章节图标）
-STRICT_THRESHOLD: float = 0.90
-#: 一次匹配最多返回多少个结果，防止满屏噪点
-MAX_MATCHES: int = 32
-#: 匹配结果非极大值抑制的合并距离（像素），去掉同一个按钮的重复命中
-MATCH_MERGE_DISTANCE: int = 12
-
-#: 模板匹配尺度候选。运行截屏与模板采集尺度不一致时（例如 macOS 上截 iOS 镜像窗口
-#: 后被拖拽缩放），逐个尺度缩放模板尝试匹配，取置信度最高的命中。
-#: 可用环境变量 YYS_TEMPLATE_SCALES 覆盖，例如 "1.0,0.8,0.6"。
-#:
-#: macOS 上原来一直试到 0.3，那太宽：尺度下限真正的约束是**缩放后的绝对像素数**，
-#: 不是比例（见 vision/scales.py）。
-#: 为什么必须留到 0.4：模板库里的采集比例是**混的**，不是只有当前窗口比例一种。
-#: 真机实测（同一画面逐尺度）：
-#:   挑战_碎片.png   56x55   在 x1.0 命中 1.00  —— 按当前镜像窗口比例截的
-#:   碎片打完.png   186x208  在 x0.4  命中 0.99，x1.0 只有 0.27 —— 按约 2.5 倍比例截的
-#: 把尺度收到 1.0~0.8 会**直接废掉结算识别**（真机踩过：战斗打完结算点不掉，连续 35 拍
-#: 啥也没识别到）。所以这里保留到 0.4，靠下面的像素下限去挡「缩到几十像素的噪声」。
-TEMPLATE_SCALES: Tuple[float, ...] = (
-    (1.0,) if os.name == "nt" else (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4)
-)
-#: 缩放后模板每条边的像素下限；低于它的尺度直接跳过（策略见 vision/scales.py）。
-#: 24 是量出来的：碎片章节头像 41x51 @0.5 = 20x25（真机撞出 0.96 的那个噪声）被挡掉，
-#: 而碎片打完 186x208 @0.4 = 74x83（真命中 0.99）留着。
-MIN_SCALED_TEMPLATE_SIDE: int = 24
-_ENV_SCALES = os.environ.get("YYS_TEMPLATE_SCALES")
-if _ENV_SCALES:
-    TEMPLATE_SCALES = tuple(float(item) for item in _ENV_SCALES.split(",") if item.strip())
-
 
 # --------------------------------------------------------------------------- #
-# 状态机 / 流程
+# runner / 流程引擎
 # --------------------------------------------------------------------------- #
-#: 等待某个状态出现的默认超时（秒）与轮询间隔（秒）
-DEFAULT_WAIT_TIMEOUT: float = 30.0
+#: 轮询识图的默认间隔（秒），样本不足时的兜底节奏
 DEFAULT_WAIT_INTERVAL: float = 2.0
-#: 一次探索最多拖动地图的次数
-EXPLORE_MAX_PAGE: int = 4
-#: 单页地图连续多少次找不到怪才翻页
-EXPLORE_LOST_LIMIT: int = 2
-#: 体力耗尽时的退出码（沿用旧脚本约定）
+#: 体力耗尽时的退出码
 EXIT_CODE_ABORT: int = 300
 
 # --------------------------------------------------------------------------- #
 # 循环计时 / 自适应等待（core/timing.py）
 # --------------------------------------------------------------------------- #
-#: 总开关。关掉后 CycleTimer.plan() 永远返回「不盲等 + 调用方给的间隔」，
-#: 也就是改造前的行为。环境变量 YYS_ADAPTIVE_WAIT=0 可临时关闭，
-#: 命令行 --no-adaptive-wait 与之等价。
+#: 关掉后 CycleTimer.plan() 永远返回「不盲等 + 调用方给的间隔」。
+#: 环境变量 YYS_ADAPTIVE_WAIT=0 与命令行 --no-adaptive-wait 等价。
 ADAPTIVE_WAIT: bool = os.environ.get("YYS_ADAPTIVE_WAIT", "1").strip().lower() not in (
     "0", "false", "no", "off")
 
 #: 参与统计的最近样本数（滑动窗口）
 TIMING_WINDOW: int = 20
-#: 攒够多少个「可用样本」才算收敛、可以开始盲等；不足时行为与改造前完全一致
+#: 攒够多少个「可用样本」才算收敛、可以开始盲等；不足时按调用方间隔轮询
 TIMING_WARMUP_SAMPLES: int = 5
 #: 异常值判据：样本 > p50 * 该倍数就不计入 min / p10（仍然入库供审计）
 TIMING_OUTLIER_FACTOR: float = 2.5
@@ -161,15 +113,13 @@ TIMING_RESET_SAFETY: float = 0.5
 TIMING_RESET_RECOVER_SAMPLES: int = 10
 #: 盲等硬上限（秒）：估计再离谱也不会长时间瞎等
 TIMING_MAX_BLIND_WAIT: float = 90.0
-#: 收敛后轮询识图的间隔（秒）。比 DEFAULT_WAIT_INTERVAL 更细，命中更及时，
+#: 收敛后轮询识图的间隔（秒），比 DEFAULT_WAIT_INTERVAL 更细，命中更及时。
 #: 因为大头已经由盲等省掉了。
 TIMING_FINE_INTERVAL: float = 1.0
 #: 盲等最多吃掉 timeout 减去这个值，剩下的留给细粒度轮询
 TIMING_FINE_WINDOW: float = 10.0
-#: 「一次截屏 + 模板匹配」成本的滑动窗口长度（只在内存，不入库）
+#: 「一次截屏 + 模型判定」成本的滑动窗口长度（只在内存，不入库）
 TIMING_PROBE_WINDOW: int = 10
-#: 流程引擎连续多少次什么都没识别到，就广播一次 state.unknown
-UNKNOWN_POLL_LIMIT: int = 5
 
 
 # --------------------------------------------------------------------------- #
@@ -179,7 +129,7 @@ UNKNOWN_POLL_LIMIT: int = 5
 PYAUTOGUI_PAUSE: float = 0.2
 PYAUTOGUI_FAILSAFE: bool = False
 
-#: 每次点击前后附加的随机停顿区间（秒），旧代码 personal_pause() 的行为
+#: 每次点击前后附加的随机停顿区间（秒）
 HUMAN_PAUSE_RANGE: Tuple[float, float] = (0.0, 1.0)
 #: 点击落点的随机抖动半径（逻辑像素）
 HUMAN_JITTER: int = 3
@@ -202,3 +152,18 @@ OLLAMA_NUM_PREDICT: int = 800
 #: 判定「同一界面」所需的最低可信度
 SIMILARITY_MATCH_THRESHOLD: float = float(
     os.environ.get("YYS_SIMILARITY_THRESHOLD", "0.6"))
+
+# --------------------------------------------------------------------------- #
+# runner/ 主流程（DSL 驱动的分组标注执行）
+# --------------------------------------------------------------------------- #
+#: 分组目录里的 DSL 文件名，主流程发现它就自动加载
+RUNNER_DSL_FILENAME: str = os.environ.get("YYS_RUNNER_DSL", "flow.py")
+#: 一步（等某张图出现）的默认超时（秒）
+RUNNER_STEP_TIMEOUT: float = float(os.environ.get("YYS_RUNNER_STEP_TIMEOUT", "120"))
+#: 一整轮（走完全部 steps）的默认超时（秒）
+RUNNER_ROUND_TIMEOUT: float = float(os.environ.get("YYS_RUNNER_ROUND_TIMEOUT", "900"))
+#: 两次模型判定之间额外睡眠的秒数。
+#: 一次判定本身要 1~3 秒，真实轮询周期 = 判定耗时 + 本值。
+RUNNER_PROBE_INTERVAL: float = float(os.environ.get("YYS_RUNNER_PROBE_INTERVAL", "1.0"))
+#: 命中之后、点击之前的固定停顿（秒），给界面动画留时间
+RUNNER_SETTLE_PAUSE: float = float(os.environ.get("YYS_RUNNER_SETTLE_PAUSE", "0.6"))

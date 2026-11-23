@@ -1,46 +1,16 @@
-"""拟人化鼠标操作。
+"""拟人化鼠标：只认屏幕绝对坐标，逻辑坐标换算由上层负责。
 
-对应旧 scripts/a_base.py 里的 click / lock_click / personal_pause / next_page。
-这一层只认**屏幕绝对坐标**，逻辑坐标换算由 GameController 负责。
+落点抖动、动作前后停顿、拖动分步缓动。
 
-拟人化手段：
-- 落点随机抖动（不会每次都点同一个像素）
-- 动作前后随机停顿（旧 personal_pause 的 0~1 秒）
-- 拖动分多步并带缓动曲线，轨迹接近人手
+macOS 礼貌点击（注入 pid_provider 后启用）：点击瞬间激活目标窗口 ->
+warp 光标到目标点并补发一个 mouseMoved -> 同坐标 down/up -> 还原光标与焦点；
+轮询识别期间完全不碰鼠标。warp 不产生移动事件，App 侧缓存的光标位置不更新，
+合成点击会被静默丢掉，所以必须配套补发 mouseMoved；滚动事件本身不带坐标，
+也要先落点。前台的查询与设置一律走 System Events（osascript + unix id），
+NSRunningApplication / NSWorkspace 在命令行进程里不可信。
 
-macOS「礼貌点击」模式（controller 注入 pid_provider 后启用）：
-镜像 / 游戏窗口只在自己是活跃 App 时才响应点击，而用户还要继续用电脑，
-所以每次点击只做三件事，把干扰压到点击瞬间：
-1. 记下用户光标位置与当前前台 App；
-2. 用 System Events 短暂激活目标窗口 -> 把光标 warp 到目标点并**补发一个
-   mouseMoved** -> 在同一个坐标发 down/up（不做光标移动动画）；
-3. 立刻把光标 warp 回原位（同样补发 mouseMoved），并把焦点还给用户原来的 App。
-轮询识别期间完全不碰鼠标与焦点。
-
-为什么必须补发 mouseMoved（实测踩出来的坑）：
-`CGWarpMouseCursorPosition` 只改窗口服务里的指针坐标，**不产生鼠标移动事件**。
-目标 App 自己缓存的光标位置（hover 状态、Mac Catalyst 的指针->触摸桥接）不会跟着
-更新，系统也要等下一次真实硬件移动才刷新。只 warp / 只按坐标发事件时，合成点击会
-被静默丢掉，表现就是「跑一段时间后点不动，用户手动晃一下鼠标又恢复」。
-
-两个实测结论（别再踩）：
-- 命令行 Python 进程里 `NSRunningApplication.activateWithOptions_` 与
-  `NSWorkspace.frontmostApplication()` 都不可信（前者不生效、后者返回过期值），
-  前台的查询与设置一律走 System Events（osascript + unix id）；
-- 合成点击（CGEventPost）需要当前进程链有「辅助功能」权限，否则被系统静默丢弃，
-  用 accessibility_trusted() 自检（ctypes 直调，本机 pyobjc 缺 ApplicationServices 子包）。
-
-激活失败的处理（挂机健壮性）：
-置前目标窗口这一步很容易偶发失败 —— 用户正好在切窗口、系统刚从休眠唤醒、
-锁屏解锁瞬间、osascript 超时或 System Events 忙。这些都是瞬时的，所以
-`_activate_frontmost()` 会按 `settings.ACTIVATE_MAX_ATTEMPTS` 自动重试。
-重试仍然失败时**不抛异常终止进程**（旧行为是抛裸 RuntimeError，一路穿到 main.py
-变成未捕获 traceback，整晚挂机白跑），而是：
-1. 跳过这一次操作，click() 返回 None（drag / scroll 静默返回），
-   上层（flows/engine.py + flows/battle_cycle.py）据此重置状态、下一拍自动重试；
-2. 连续失败达到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才抛 `WindowActivationError`
-   —— 它是 YysError 子类，main.py 会打印一句话并以退出码 1 结束，不是 traceback。
-   这个上限是为了避免「自动化权限被收回后脚本空跑一整晚什么都没做」。
+激活失败按 ACTIVATE_MAX_ATTEMPTS 重试；仍失败就跳过本次操作（click 返回
+None），连续失败到 ACTIVATE_MAX_CONSECUTIVE_FAILURES 才抛 WindowActivationError。
 """
 from __future__ import annotations
 
@@ -403,10 +373,9 @@ def _activate_frontmost(
 
     返回 (是否成功, 最后一次 osascript 报错)。
 
-    为什么必须重试：单次激活失败在挂机场景里很常见 —— 用户正好在切窗口、
-    系统刚从休眠唤醒、锁屏解锁瞬间、osascript 偶发超时或 System Events 忙。
-    这些都是瞬时的，隔半秒再试一次通常就好了。以前这里失败就直接抛异常，
-    一路穿到 main.py 变成未捕获 traceback，整晚的挂机白跑。
+    单次激活失败很常见 —— 用户正好在切窗口、系统刚从休眠唤醒、
+    锁屏解锁瞬间、osascript 偶发超时或 System Events 忙，
+    这些都是瞬时的，隔半秒再试一次通常就好了。
     """
     attempts = (settings.ACTIVATE_MAX_ATTEMPTS if attempts is None
                 else max(1, int(attempts)))
@@ -444,18 +413,13 @@ def _capture_cursor_position() -> Optional[Tuple[float, float]]:
         return None
 
 
-# --------------------------------------------------------------------------- #
-# 指针同步：warp + 补发 mouseMoved（礼貌点击的地基）
+# 指针同步
 # --------------------------------------------------------------------------- #
 def _warp_to(point: ScreenPoint, settle: float = _MOVE_SETTLE) -> None:
-    """把光标放到 point，并补发一个同坐标的 mouseMoved。
+    """warp 光标并补发同坐标 mouseMoved。
 
-    只用 `CGWarpMouseCursorPosition` 有两个坑：
-    1. 它**不产生鼠标移动事件**，目标 App 缓存的光标位置（hover 状态、
-       Mac Catalyst 的指针->触摸桥接）仍是旧值，随后按坐标发的 down/up
-       会被丢掉，要等用户真的动一次鼠标才恢复；
-    2. 它不重置硬件累计位移，下一次真实移动会把光标拽回旧基准 + delta，
-       所以 warp 前后各切一次 associate，点完再补发事件。
+    warp 不产生移动事件、也不重置硬件累计位移，
+    所以前后各切一次 associate，并补发一次事件。
     """
     import Quartz
 

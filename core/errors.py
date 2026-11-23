@@ -1,8 +1,5 @@
-"""项目统一异常。
+"""项目统一异常。全部继承 YysError，由 main.py 转成退出码。"""
 
-旧代码用 exit(300) 直接终止进程，无法被上层捕获和复用；
-现在一律抛异常，由 main.py 决定退出码。
-"""
 from __future__ import annotations
 
 

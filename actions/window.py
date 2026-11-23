@@ -109,7 +109,7 @@ class Win32WindowFinder(WindowFinder):
             log.debug("置前窗口失败: %s", exc)
 
     def move_to_corner(self, rect: WindowRect, x: int = 0, y: int = 0) -> None:
-        """把整个窗口（含边框）挪到屏幕 (x, y)，对应旧 scripts/e0001.py。"""
+        """把整个窗口（含边框）挪到屏幕 (x, y)。"""
         win32gui, win32con = _import_win32(with_con=True)
         hwnd = getattr(self, "_hwnd", None)
         if win32gui is None or not hwnd:
