@@ -168,29 +168,22 @@ def build_namespace(group: GroupRef) -> Dict[str, Any]:
     }
 
 
-def load_flow(path: Path, group: GroupRef) -> Flow:
-    """加载并校验 DSL 文件。"""
-    path = Path(path)
-    if not path.is_file():
-        raise DslError("DSL 文件不存在: {}（用 --init-dsl 生成一份）".format(path))
-    try:
-        source = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DslError("读取 DSL 失败 {}: {}".format(path, exc))
-
+def load_source(source: str, origin: str, group: GroupRef) -> Flow:
+    """执行 DSL 源码并校验。"""
+    label = Path(origin).name or origin
     namespace = build_namespace(group)
     try:
-        exec(compile(source, str(path), "exec"), namespace)
+        exec(compile(source, origin, "exec"), namespace)
     except DslError:
         raise
     except SyntaxError as exc:
-        raise DslError("DSL 语法错误 {} 第 {} 行：{}".format(path.name, exc.lineno, exc.msg))
+        raise DslError("DSL 语法错误 {} 第 {} 行：{}".format(label, exc.lineno, exc.msg))
     except Exception as exc:
-        raise DslError("DSL 执行失败 {}：{}: {}".format(path.name, type(exc).__name__, exc))
+        raise DslError("DSL 执行失败 {}：{}: {}".format(label, type(exc).__name__, exc))
 
     raw_steps = namespace.get("steps")
     if raw_steps is None:
-        raise DslError("{} 里没有定义 steps 列表".format(path.name))
+        raise DslError("{} 里没有定义 steps 列表".format(label))
     if isinstance(raw_steps, Step):
         raw_steps = [raw_steps]
     if not isinstance(raw_steps, (list, tuple)):
@@ -201,6 +194,7 @@ def load_flow(path: Path, group: GroupRef) -> Flow:
         if not isinstance(item, Step):
             raise DslError("steps[{}] 不是 step() 的返回值，而是 {}".format(
                 index - 1, type(item).__name__))
+
     hooks = {name: namespace[name] for name in HOOKS if callable(namespace.get(name))}
     name = namespace.get("name") or group.name
     round_timeout = namespace.get("round_timeout")
@@ -211,9 +205,39 @@ def load_flow(path: Path, group: GroupRef) -> Flow:
         round_timeout=None if round_timeout is None else float(round_timeout),
         hooks=hooks,
         namespace=namespace,
-        source=path,
+        source=Path(origin),
         entry=entry,
     )
+
+
+def load_flow(path: Path, group: GroupRef) -> Flow:
+    """加载并校验 DSL 文件。"""
+    path = Path(path)
+    if not path.is_file():
+        raise DslError("DSL 文件不存在: {}".format(path))
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DslError("读取 DSL 失败 {}: {}".format(path, exc))
+    return load_source(source, str(path), group)
+
+
+def load_or_scaffold(group: GroupRef, write: bool = True) -> Tuple[Flow, bool]:
+    """载入分组 DSL；没有就按标注生成默认链式流程。
+
+    返回 (Flow, 是否本次新生成)。
+    """
+    if group.has_dsl():
+        return load_flow(group.dsl_path, group), False
+    if not any(shot.annotations for shot in group.shots):
+        raise DslError(
+            "分组「{}」没有 {}，组内截图也都没有标注，生成不出默认流程。"
+            "先在标注页给每张截图标出要点击的位置：python similarity/app.py".format(
+                group.name, settings.RUNNER_DSL_FILENAME))
+    if write:
+        write_scaffold(group)
+        return load_flow(group.dsl_path, group), True
+    return load_source(scaffold(group), str(group.dsl_path), group), True
 
 
 def _entry_names(entry: Any, raw_steps: Sequence[Step]) -> Tuple[str, ...]:
@@ -255,7 +279,7 @@ def scaffold(group: GroupRef) -> str:
     lines: List[str] = [
         '"""分组「{}」的执行顺序。'.format(group.name),
         "",
-        "本文件由 main.py --init-dsl 生成，按截图采集时间排了个初始顺序，",
+        "本文件按截图采集时间自动生成了链式顺序（一步接一步，跑完回到第 1 步），",
         "请照着实际的游戏流程调整 steps 的顺序与超时。",
         "",
         "step(target, click=None, shot=None, timeout=None, interval=None,",

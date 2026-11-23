@@ -95,6 +95,10 @@ def grab(source: str = "window", process: Optional[str] = None) -> Shot:
         )
 
     capture = ScreenCapture(region_provider=lambda: rect.region)
+    if source == "window":
+        from actions.mouse import ensure_frontmost
+
+        ensure_frontmost(getattr(finder, "pid", None), rect.region)
     frame = capture.grab()
     ok, buffer = cv2.imencode(".png", frame.image)
     if not ok:

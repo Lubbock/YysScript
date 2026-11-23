@@ -1,7 +1,8 @@
 """截屏：按窗口区域截图。
 
-region_provider 由 actions 层注入游戏窗口矩形。窗口被遮挡时拍到的是遮挡物，
-跑之前把游戏窗口露出来。
+region_provider 由 actions 层注入游戏窗口矩形，截的是屏幕上那块区域。
+调用方（runner.session / similarity.capture）在截屏前调 `actions.mouse.ensure_frontmost`
+把目标窗口提到最前，否则拍到的是压在上面的窗口。
 """
 from __future__ import annotations
 

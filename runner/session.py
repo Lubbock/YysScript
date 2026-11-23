@@ -105,9 +105,16 @@ class Session:
 
     def grab(self) -> Tuple[bytes, Frame]:
         """截屏，返回 (PNG 字节, Frame)。"""
+        self._ensure_frontmost()
         frame = self.capture.grab()
-        png = encode_png(frame.image)
-        return png, frame
+        return encode_png(frame.image), frame
+
+    def _ensure_frontmost(self) -> None:
+        """截的是屏幕上那块矩形，先把目标窗口提到最前，避免拍到别的窗口。"""
+        from actions.mouse import ensure_frontmost
+
+        region = self._region()  # 顺带定位窗口，finder 才有目标进程 PID
+        ensure_frontmost(self._pid(), region)
 
     def capture_viewport(self, shot: ShotRef) -> Viewport:
         """采集那张图时的窗口换算器。"""

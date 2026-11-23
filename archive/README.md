@@ -47,7 +47,7 @@
 | `actions/viewport.py` | 标注坐标 → 基准逻辑坐标 → 当前窗口屏幕坐标 |
 | `actions/mouse.py` | 拟人化点击（抖动、随机停顿、macOS 礼貌点击与自动重试） |
 | `actions/window.py` | 定位模拟器 / iOS 镜像窗口客户区，提供 region 与 window id |
-| `vision/capture.py` | 截屏（macOS 15+ 一律按窗口区域截，窗口要露出来；≤14 才走按编号抓内容） |
+| `vision/capture.py` | 截屏（按窗口区域截；截屏前由调用方 `ensure_frontmost` 把窗口提到最前） |
 | `vision/types.py` | `Frame` 数据结构（`Box` / `Match` 已随模板匹配删除） |
 | `core/timing.py` | 自适应等待（盲等到历史 p10 + 细粒度轮询、异常值剔除、超限回退） |
 | `core/bus.py` | 事件总线（新流程可选用） |

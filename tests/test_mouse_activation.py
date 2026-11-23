@@ -264,3 +264,95 @@ def test_non_polite_path_is_untouched(no_side_effects, monkeypatch):
     assert mouse.click((7, 8)) == (7, 8)
     assert calls and calls[0]["x"] == 7 and calls[0]["y"] == 8
     assert mouse.activation_failures == 0
+
+
+# --------------------------------------------------------------------------- #
+# 截屏前置前：只在目标窗口真被压住时才抢焦点
+# --------------------------------------------------------------------------- #
+REGION = (100, 100, 200, 100)
+
+
+class FakeSys:
+    platform = "darwin"
+
+
+def win(pid, x, y, width=50, height=50, layer=0, minimized=False):
+    return {"kCGWindowLayer": layer, "kCGWindowOwnerPID": pid,
+            "kCGIsMinimized": minimized,
+            "kCGWindowBounds": {"X": x, "Y": y, "Width": width, "Height": height}}
+
+
+def target_win():
+    return win(PID, REGION[0], REGION[1], REGION[2], REGION[3])
+
+
+def test_overlaps_region():
+    assert mouse_mod._overlaps(win(1, 150, 150)["kCGWindowBounds"], REGION)
+    assert not mouse_mod._overlaps(win(1, 400, 400)["kCGWindowBounds"], REGION)
+    assert not mouse_mod._overlaps(None, REGION)
+
+
+def test_obscured_ignores_windows_outside_region(monkeypatch):
+    """别的窗口在屏幕其它位置：不算遮挡，不必抢焦点。"""
+    monkeypatch.setattr(mouse_mod, "_window_infos", lambda: [win(OTHER_PID, 0, 0), target_win()])
+
+    assert mouse_mod._obscured(PID, REGION) is False
+
+
+def test_obscured_detects_window_on_top(monkeypatch):
+    """排在目标窗口之前、又压住该区域 -> 判定遮挡。"""
+    monkeypatch.setattr(mouse_mod, "_window_infos",
+                        lambda: [win(OTHER_PID, 120, 120), target_win()])
+
+    assert mouse_mod._obscured(PID, REGION) is True
+
+
+def test_obscured_skips_menubar_and_minimized(monkeypatch):
+    """菜单栏（layer != 0）与最小化窗口不算遮挡。"""
+    monkeypatch.setattr(mouse_mod, "_window_infos", lambda: [
+        win(OTHER_PID, 120, 120, layer=24),
+        win(OTHER_PID, 120, 120, minimized=True),
+        target_win(),
+    ])
+
+    assert mouse_mod._obscured(PID, REGION) is False
+
+
+def test_obscured_true_when_window_list_unavailable(monkeypatch):
+    """拿不到窗口列表就当作被遮挡，宁可多置前一次。"""
+    monkeypatch.setattr(mouse_mod, "_window_infos", lambda: None)
+
+    assert mouse_mod._obscured(PID, REGION) is True
+
+
+def test_ensure_frontmost_skips_activation_when_clear(monkeypatch):
+    """没被遮挡就走快路径，一次 osascript 都不发。"""
+    calls = []
+    monkeypatch.setattr(mouse_mod, "sys", FakeSys())
+    monkeypatch.setattr(mouse_mod, "_obscured", lambda pid, region: False)
+    monkeypatch.setattr(mouse_mod, "_activate_frontmost",
+                        lambda pid, **kwargs: calls.append(pid) or (True, ""))
+
+    assert mouse_mod.ensure_frontmost(PID, REGION) is True
+    assert calls == []
+
+
+def test_ensure_frontmost_activates_when_obscured(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mouse_mod, "sys", FakeSys())
+    monkeypatch.setattr(mouse_mod, "_obscured", lambda pid, region: True)
+    monkeypatch.setattr(mouse_mod, "_activate_frontmost",
+                        lambda pid, **kwargs: calls.append(pid) or (True, ""))
+
+    assert mouse_mod.ensure_frontmost(PID, REGION) is True
+    assert calls == [PID]
+
+
+def test_ensure_frontmost_noop_without_pid(monkeypatch):
+    """拿不到 PID（非 macOS）时不置前，也不报错。"""
+    calls = []
+    monkeypatch.setattr(mouse_mod, "_activate_frontmost",
+                        lambda pid, **kwargs: calls.append(pid) or (True, ""))
+
+    assert mouse_mod.ensure_frontmost(None, REGION) is False
+    assert calls == []

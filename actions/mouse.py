@@ -395,6 +395,61 @@ def _activate_frontmost(
             time.sleep(pause)
     return False, err
 
+def _window_infos():
+    """屏幕上的窗口列表，按前到后排序；取不到返回 None。"""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import Quartz
+    except ImportError:
+        return None
+    try:
+        return Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly
+            | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID)
+    except Exception as exc:
+        log.debug("读取窗口列表失败: %s", exc)
+        return None
+
+
+def _overlaps(bounds, region: Tuple[int, int, int, int]) -> bool:
+    """窗口 bounds 与 (left, top, width, height) 区域是否相交。"""
+    if not bounds:
+        return False
+    left, top = int(bounds["X"]), int(bounds["Y"])
+    right, bottom = left + int(bounds["Width"]), top + int(bounds["Height"])
+    x, y, width, height = region
+    return left < x + width and right > x and top < y + height and bottom > y
+
+
+def _obscured(pid: int, region: Optional[Tuple[int, int, int, int]]) -> bool:
+    """排在目标窗口之前、又压住该区域的窗口存在，就算被遮挡。"""
+    infos = _window_infos()
+    if infos is None:
+        return True
+    for info in infos:
+        if info.get("kCGWindowLayer", 1) != 0 or info.get("kCGIsMinimized"):
+            continue
+        if info.get("kCGWindowOwnerPID") == pid:
+            return False
+        if region is not None and not _overlaps(info.get("kCGWindowBounds"), region):
+            continue
+        return True
+    return True
+
+
+def ensure_frontmost(pid: Optional[int],
+                     region: Optional[Tuple[int, int, int, int]] = None) -> bool:
+    """目标窗口没被压住返回 True，否则置前一次。"""
+    if not pid or sys.platform != "darwin":
+        return False
+    if not _obscured(pid, region):
+        return True
+    ok, err = _activate_frontmost(pid)
+    if not ok:
+        log.warning("置前目标窗口失败 pid=%s: %s", pid, err)
+    return ok
+
 
 def _capture_cursor_position() -> Optional[Tuple[float, float]]:
     """记下用户当前光标位置（屏幕绝对坐标），点完好还原。

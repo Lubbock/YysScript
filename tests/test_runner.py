@@ -11,7 +11,7 @@ import pytest
 from actions.window import GameWindow, WindowFinder, WindowRect
 from core.timing import CycleTimer
 from runner.actor import Actor
-from runner.dsl import load_flow, scaffold, step, write_scaffold
+from runner.dsl import load_flow, load_or_scaffold, scaffold, step, write_scaffold
 from runner.engine import Runner, build_runner
 from runner.errors import DslError, GroupError, RunnerError, StepResolveError
 from runner.group import load_group
@@ -1058,3 +1058,124 @@ def test_entry_probe_reuses_the_matching_verdict(tmp_path):
     assert report.probes == 2
     assert judge.seen == [NAV_IDS[2], NAV_IDS[3]]
     assert len(session.mouse.clicks) == 2
+
+
+class FakeFrame:
+    image = object()
+    origin = (0, 0)
+    size = (10, 10)
+
+
+class StubCapture:
+    """只回一个假 Frame 的截屏器。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    def grab(self, region=None):
+        self.calls += 1
+        return FakeFrame()
+
+
+def _session_with_pid(pid):
+    import runner.session as session_module
+
+    finder = FakeFinder(WindowRect(*CAPTURE_REGION, wid=1))
+    if pid is not None:
+        finder.pid = pid
+    capture = StubCapture()
+    session = session_module.Session(
+        window=GameWindow(finder=finder, allow_fullscreen=False),
+        mouse=FakeMouse(), capture=capture)
+    return session_module, session, capture
+
+
+def test_grab_brings_target_window_frontmost(monkeypatch):
+    """区域截屏会拍到遮挡窗口，所以截屏前先把目标窗口置前。"""
+    seen = []
+    monkeypatch.setattr("actions.mouse.ensure_frontmost",
+                        lambda pid, region=None: seen.append((pid, region)) or True)
+    session_module, session, capture = _session_with_pid(4242)
+    monkeypatch.setattr(session_module, "encode_png", lambda image: b"png")
+
+    png, _frame = session.grab()
+
+    assert seen == [(4242, CAPTURE_REGION)]
+    assert capture.calls == 1
+    assert png == b"png"
+
+
+def test_grab_without_pid_still_captures(monkeypatch):
+    """拿不到目标进程 PID（非 macOS）时不置前，照常截屏。"""
+    seen = []
+    monkeypatch.setattr("actions.mouse.ensure_frontmost",
+                        lambda pid, region=None: seen.append((pid, region)) or True)
+    session_module, session, capture = _session_with_pid(None)
+    monkeypatch.setattr(session_module, "encode_png", lambda image: b"png")
+
+    session.grab()
+
+    assert seen == [(None, CAPTURE_REGION)]
+    assert capture.calls == 1
+
+
+# --------------------------------------------------------------------------- #
+# 没有 flow.py 时按标注自动生成链式流程
+# --------------------------------------------------------------------------- #
+def test_load_or_scaffold_creates_chained_flow(root, group):
+    """分组没有 flow.py：按截图采集顺序生成链式 steps 并落盘。"""
+    assert not group.has_dsl()
+
+    flow, created = load_or_scaffold(group)
+
+    assert created is True
+    assert group.dsl_path.is_file()
+    assert [item.target for item in flow.steps] == ["挑战", "完成"]
+    assert flow.name == "御魂十一"
+    assert "on_step_timeout" in flow.hooks
+
+
+def test_load_or_scaffold_keeps_existing_file(root, group):
+    """已有 flow.py 时原样加载，不覆盖用户改过的内容。"""
+    write_dsl(root, BASIC_DSL + '\nentry = ["完成"]\n')
+    before = group.dsl_path.read_text(encoding="utf-8")
+
+    flow, created = load_or_scaffold(group)
+
+    assert created is False
+    assert group.dsl_path.read_text(encoding="utf-8") == before
+    assert flow.entry == ("完成",)
+
+
+def test_load_or_scaffold_without_write_leaves_no_file(root, group):
+    """write=False：只在内存构建，不落盘。"""
+    flow, created = load_or_scaffold(group, write=False)
+
+    assert created is True
+    assert not group.dsl_path.exists()
+    assert [item.target for item in flow.steps] == ["挑战", "完成"]
+
+
+def test_load_or_scaffold_requires_some_annotation(tmp_path):
+    """一张标注都没有：生成不出流程，报错指向标注页。"""
+    root = build_dataset(tmp_path, shots=[{
+        "id": "20260101-000009-000009", "captured_at": "2026-01-01 00:00:09",
+        "width": 690, "height": 356, "source": "window", "origin": [189, 251],
+        "region": list(CAPTURE_REGION), "window_id": 4242, "process": "Fake",
+        "note": "", "annotations": [],
+    }])
+    group = load_group("御魂十一", root)
+
+    with pytest.raises(DslError, match="没有标注"):
+        load_or_scaffold(group)
+
+
+def test_main_runs_group_without_flow_file(tmp_path):
+    """按分组名直接跑：没有 flow.py 也能起来（--dry-run 不截屏不点击）。"""
+    import main as main_mod
+
+    root = build_dataset(tmp_path)
+    code = main_mod.main(["--group", "御魂十一", "--dry-run", "--data-dir", str(root)])
+
+    assert code == 0
+    assert (root / "groups" / "soul11" / "flow.py").is_file()

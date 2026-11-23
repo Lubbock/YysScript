@@ -97,12 +97,13 @@ archive/               旧模板匹配管线，独立一棵树，不被上面任
 ### `vision/` — 截屏（职责 1）
 - `types.py`：`Frame`（截图 + 原点 + 尺寸），坐标是**屏幕绝对坐标**。（`Box` / `Match` 是模板匹配
   的命中结果类型，随旧管线一起删除。）
-- `capture.py`：`ScreenCapture`，可注入 `region_provider` 只截游戏窗口区域（更快、且不会被桌面其它窗口/弹窗干扰）。`runner/` 与 `similarity/` 都靠它取图。
-  另有 `window_id_provider` 走 Quartz 按窗口编号抓内容（遮挡 / 拖动都不影响），**只在 macOS 14 及以下启用**：
-  macOS 15+ 上 `CGWindowListCreateImage` 已被 Apple 移除，调用会**先阻塞约 30 秒再返回 NULL**，
-  于是每一拍都变成「白等 30s + 真正干活 0.1s」。现在按版本门禁跳过，并在首次失败后本次进程内不再尝试。
-  ⚠️ 区域截屏的代价：游戏窗口被遮挡时会拍到遮挡物，跑之前把镜像窗口露出来。
+- `capture.py`：`ScreenCapture`，注入 `region_provider` 只截游戏窗口那块区域。`runner/` 与 `similarity/` 都靠它取图。
+  按窗口编号抓内容的通道（Quartz `CGWindowListCreateImage`）**已删除**：macOS 15+ 上该 API 被 Apple 移除，
+  调用会**先阻塞约 30 秒再返回 NULL**，每一拍都变成「白等 30s + 真正干活 0.1s」。
   实测（macOS 26.5）：`grab()` 30.1s → **0.13s**，单拍判定 33s → **3.3s**。
+  ⚠️ 区域截屏拍的是屏幕上那块矩形，**压在上面的窗口会被一起拍进来**。因此调用方在截屏前调
+  `actions.mouse.ensure_frontmost(pid, region)` 把目标窗口提到最前：只有存在「排在目标窗口之前、
+  又与该区域相交」的窗口时才真置前（实测 0.36s），否则走约 4ms 的快路径，不会反复抢焦点。
 - **已归档**：`template_matcher.py`（多尺度模板匹配 + NMS）、`scales.py`（尺度策略）、
   `color_detector.py`（HSV 颜色轮廓）移到 `archive/vision/`。理由见 `archive/README.md`：
   模板与客户端版本、采集比例强绑定，缩小匹配会撞出 0.9+ 假命中，脚本照着点就是在乱点。
@@ -121,6 +122,7 @@ runner 不需要状态注册表：「我在哪个界面」由模型对**一张**
 - `viewport.py`：`Viewport`，纯计算。`to_screen(Point)` 逻辑坐标 → 屏幕坐标（按窗口位置平移 + 按窗口尺寸缩放 + 校准偏移 + 越界裁剪），`to_logical(screen)` 反向。**这一层让换分辨率、窗口不在原点都不再致命。**
 - `mouse.py`：`HumanMouse`，只认屏幕坐标。落点随机抖动、动作间随机停顿（对应旧 `personal_pause`）、拖动分步 + 缓动。macOS 上 controller 注入目标进程 PID 后启用「礼貌点击」：点击瞬间激活目标窗口 -> 把光标 warp 到目标点**并补发一个 mouseMoved** -> 在同一坐标发 down/up -> 还原光标（同样补发 mouseMoved）与焦点，轮询识别期间完全不碰鼠标。坑：`CGWarpMouseCursorPosition` 只改窗口服务的指针坐标、不产生移动事件，App 侧缓存的光标位置（hover / Mac Catalyst 的指针→触摸桥接）不更新，只按坐标发事件会被静默丢掉，表现为「跑一段时间后点不动，手动晃一下鼠标才恢复」，所以 warp 必须配套补发 `kCGEventMouseMoved`；滚动事件本身不带坐标，也要先落点。
   **激活失败不再终止进程**：`_activate_frontmost()` 按 `ACTIVATE_MAX_ATTEMPTS` 自动重试（用户切窗口 / 刚唤醒 / osascript 超时都是瞬时的）；仍失败就跳过本次操作，`click()` 返回 `None`（`drag` / `scroll` 静默返回），由上层重置状态、下一拍重试；只有连续失败到 `ACTIVATE_MAX_CONSECUTIVE_FAILURES` 才抛 `WindowActivationError`（YysError -> 退出码 1 + 一句话，不是 traceback）。旧行为是抛裸 `RuntimeError`，未被 `main.py` 捕获，整晚挂机白跑。
+  另有模块级 `ensure_frontmost(pid, region)`：**截屏前**把目标窗口提到最前（区域截屏会把压在上面的窗口一起拍进来）。判据是「窗口列表里排在目标窗口之前、又与该区域相交的窗口是否存在」，所以别的 App 窗口在屏幕其它位置时不会误触发；没被遮挡走约 4ms 快路径，被遮挡才发 osascript（实测 0.36s）。`runner/session.grab()` 与 `similarity/capture.grab()` 都调它。
 - **已归档**：`controller.py`（`GameController` 门面，旧 flows 的唯一入口，`resolve()` 统一处理
   `Point` / `Match` / `Box` / `tuple` 四种点击目标）移到 `archive/actions/`。
   runner 用 `runner/session.py`（环境装配 + 坐标换算）与 `runner/actor.py`（点击）承担同样职责。
@@ -366,12 +368,14 @@ python -m pytest tests -q
 mouse 注入进去）。`pytest.ini` 的 `testpaths = tests` + `norecursedirs` 把 `archive/` 排除在外，
 `archive/conftest.py` 再兜一层 `collect_ignore_glob`。
 
-- `test_runner.py`：**runner 全链路**（51 个用例）。分组解析与按名字找截图/标注、DSL 加载与
+- `test_runner.py`：**runner 全链路**（63 个用例）。分组解析与按名字找截图/标注、DSL 加载与
   校验（缺 `steps` / 语法错 / 非 `step()` 元素 / 钩子收集 / `--init-dsl` 草稿）、
   **坐标换算的精确像素断言**（标注 (598,306) -> 逻辑 (887,660)；窗口没动 -> 屏幕 (787,557)；
   窗口挪到 (100,50) -> 屏幕 (987,710)）、步骤解析、主循环轮数、**每步只比一张图**、
   步骤/整轮超时、钩子返回值语义（`on_step_matched` 返回 False 跳过点击、`on_step_timeout`
-  返回 True 继续）、自适应等待接入、重试、`gfx` 辅助函数。
+  返回 True 继续）、自适应等待接入、重试、`gfx` 辅助函数、**`entry` 入口对齐**（停在序列任意
+  一格都从那格起跑、探测命中的判定直接复用、候选全不中回退第 1 步、`entry = "all"`、
+  写了不存在的步骤名加载期报错）、**截屏前置前**（`Session.grab` 传 pid + region）。
 - `test_similarity_annotator.py`：`similarity/` 采集与对比工具的存储与 API 契约（假 grabber /
   假 judge / 假 comparer）：截图落盘 PNG + JSON、前端依赖字段齐全、列表按时间倒序、
   框 / 点标注保存与回读、越界与非法 kind 被拒、非法 shot id 与路径穿越拦截、删除清理三个文件、
@@ -390,7 +394,9 @@ mouse 注入进去）。`pytest.ini` 的 `testpaths = tests` + `norecursedirs` �
   异常隔离、递归深度保护、history。（runner 目前不用总线，测的是共用能力本身。）
 - `test_duration_store.py`：sqlite 读写、均值、裁剪、SQL 注入防护。
 - `test_mouse_activation.py`：窗口激活失败时**自动重试**、重试耗尽后跳过操作而不是崩进程、
-  连续失败到上限抛 `WindowActivationError`、成功清零连续计数、非礼貌点击路径不受影响。
+  连续失败到上限抛 `WindowActivationError`、成功清零连续计数、非礼貌点击路径不受影响；
+  **截屏前置前**：区域相交判定、区域外的窗口不算遮挡、菜单栏 / 最小化窗口跳过、
+  窗口列表取不到时保守判为遮挡、没被遮挡时一次 osascript 都不发、拿不到 PID 时静默跳过。
 
 改 runner / similarity 后至少保证 `test_runner.py` 与 `test_similarity_annotator.py` 通过。
 新增分组不需要改测试（DSL 是数据，`--show` 与 `--dry-run` 就是它的检查工具）。

@@ -33,7 +33,7 @@ class WindowRect:
     top: int
     width: int
     height: int
-    #: macOS 窗口编号（Quartz window number）；有它就能按窗口抓内容，不受遮挡 / 移动影响
+    #: macOS 窗口编号（Quartz window number），只写进截图元数据备查
     wid: Optional[int] = None
 
     @property
@@ -171,11 +171,10 @@ class MacWindowFinder(WindowFinder):
 
 
 def _mac_quartz_rect(process: str) -> Optional[WindowRect]:
-    """用 Quartz 窗口列表取窗口矩形 + 窗口编号（window number）。
+    """用 Quartz 窗口列表取窗口矩形与窗口编号。
 
-    拿到 wid 后截屏层可以按窗口编号直接抓窗口内容：窗口被其它窗口遮挡、
-    或被拖动换位都不影响截图与坐标。进程名用 pgrep 取 PID 再匹配 owner，
-    避免系统语言不同导致窗口 owner 名称本地化（如「iPhone镜像」）匹配失败。
+    进程名用 pgrep 取 PID 再匹配 owner，避免系统语言不同导致窗口 owner 名称
+    本地化（如「iPhone镜像」）匹配失败。
     """
     import subprocess
 
@@ -197,7 +196,7 @@ def _mac_quartz_rect(process: str) -> Optional[WindowRect]:
                 b = w["kCGWindowBounds"]
                 x, y, width, height = (int(b[k]) for k in ("X", "Y", "Width", "Height"))
                 if w.get("kCGIsMinimized"):
-                    log.warning("镜像窗口已最小化，请先还原窗口（最小化时无法抓取窗口内容）")
+                    log.warning("镜像窗口已最小化，请先还原（最小化时截到的是别的内容）")
                     return None
                 if width > 0 and height > 0:
                     return WindowRect(left=x, top=y, width=width, height=height,

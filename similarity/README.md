@@ -73,7 +73,7 @@ python similarity/app.py --data-dir /path/to/dataset  # 数据集目录
 
 | 来源 | 用到的模块 | 说明 |
 |---|---|---|
-| 目标窗口（默认） | `actions/window.py` + `vision/capture.py` | macOS 按进程名找窗口（默认 iPhone Mirroring），拿到窗口编号后按窗口抓内容，**被遮挡 / 被拖动都不影响**；Windows 走 `Win32WindowFinder` |
+| 目标窗口（默认） | `actions/window.py` + `vision/capture.py` | macOS 按进程名找窗口（默认 iPhone Mirroring），按窗口区域截屏；截屏前先把该窗口提到最前，避免拍到压在上面的窗口。Windows 走 `Win32WindowFinder` |
 | 整屏 | 同上（`FullScreenFinder`） | 找不到窗口、或想连桌面一起截时用 |
 
 截图尺寸 = 窗口点尺寸（Retina 会缩回点数），所以**标注坐标与点击坐标同一单位**。

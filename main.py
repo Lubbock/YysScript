@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import settings  # noqa: E402
 from core.errors import StaminaExhaustedError, YysError  # noqa: E402
 from core.logger import get_logger  # noqa: E402
-from runner.dsl import load_group_flow, write_scaffold  # noqa: E402
+from runner.dsl import load_or_scaffold, write_scaffold  # noqa: E402
 from runner.engine import build_runner  # noqa: E402
 from runner.errors import DslError, GroupError, RunnerError  # noqa: E402
 from runner.group import GroupRef, list_groups, load_group  # noqa: E402
@@ -57,9 +57,19 @@ def print_groups(data_dir: Optional[Path]) -> int:
     return 0
 
 
+def resolve_flow(group: GroupRef) -> "Flow":
+    """载入分组 DSL；没有就按截图顺序自动生成链式流程并落盘。"""
+    flow, created = load_or_scaffold(group)
+    if created:
+        log.info("分组「%s」还没有 DSL，已按截图采集顺序自动生成链式流程：%s",
+                 group.name, flow.source)
+        log.info("要改顺序 / 超时 / 加 entry，直接编辑这个文件（--show 看解析结果）")
+    return flow
+
+
 def print_plan(group: GroupRef) -> int:
     """打印 DSL 解析结果。"""
-    flow = load_group_flow(group)
+    flow = resolve_flow(group)
     runner = build_runner(group, flow, dry_run=True)
     steps = runner.resolve()
     print("分组   : {}".format(group.describe()))
@@ -89,7 +99,7 @@ def check_model() -> None:
 
 def run(args: argparse.Namespace, group: GroupRef) -> int:
     """执行主循环。"""
-    flow = load_group_flow(group)
+    flow = resolve_flow(group)
     if not args.dry_run:
         check_model()
 
