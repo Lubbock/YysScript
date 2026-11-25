@@ -20,10 +20,10 @@ ollama pull lfm3-omni:latest          # 判定模型，必须同时具备 comple
 # 1) 采集：新建分组 → 截屏 → 在图上框选/点选标注 → 保存
 python similarity/app.py              # http://127.0.0.1:8901，只绑本机
 
-# 2) 生成并调整 DSL
+# 2) DSL：没有 flow.py 时按截图采集顺序自动生成链式流程，可直接跳到第 3 步
 python main.py --list                 # 全部分组（截图数 / 标注数 / 有没有 DSL）
-python main.py --group 御魂十一 --init-dsl
 python main.py --group 御魂十一 --show      # 打印每步的截图、标注、坐标、超时
+python main.py --group 御魂十一 --init-dsl  # 显式生成草稿（--force 覆盖）
 
 # 3) 跑
 python main.py --group 御魂十一 --dry-run   # 只解析，不截屏不点击

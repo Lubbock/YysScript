@@ -4,11 +4,11 @@
 窗口 / 鼠标 / 截屏 / 模型全部用假实现注入，只验证纯逻辑与坐标数学。
 """
 import json
-import json
 from pathlib import Path
 import pytest
 
 from actions.window import GameWindow, WindowFinder, WindowRect
+from config import settings
 from core.timing import CycleTimer
 from runner.actor import Actor
 from runner.dsl import load_flow, load_or_scaffold, scaffold, step, write_scaffold
@@ -24,6 +24,12 @@ CAPTURE_REGION = (189, 251, 690, 356)
 CHALLENGE_POINT = (598, 306)
 FINISH_POINT = (346, 269)
 PNG = b"\x89PNG\r\n\x1a\n-fake"
+
+
+@pytest.fixture(autouse=True)
+def no_judge_mask(monkeypatch):
+    """默认关掉顶部涂黑：假 PNG 不是真图，且大部分用例不该依赖 cv2。"""
+    monkeypatch.setattr(settings, "JUDGE_MASK_TOP_PIXELS", 0)
 
 
 class FakeFinder(WindowFinder):
@@ -1179,3 +1185,66 @@ def test_main_runs_group_without_flow_file(tmp_path):
 
     assert code == 0
     assert (root / "groups" / "soul11" / "flow.py").is_file()
+
+
+# --------------------------------------------------------------------------- #
+# 判定时涂黑窗口标题栏（需要真图，故 cv2 守护）
+# --------------------------------------------------------------------------- #
+def _real_png(width=40, height=20, value=200):
+    import cv2
+    import numpy as np
+
+    img = np.full((height, width, 3), value, np.uint8)
+    return cv2.imencode(".png", img)[1].tobytes()
+
+
+def test_gfx_mask_top_blacks_out_band():
+    pytest.importorskip("cv2", reason="mask_top 需要 cv2")
+
+    from runner import gfx
+
+    png = _real_png(width=40, height=20, value=200)
+    masked = gfx.mask_top(png, 5)
+
+    assert masked.shape == (20, 40, 3)          # 尺寸不变，标注坐标才不受影响
+    assert masked[:5].max() == 0                # 顶部 5 行全黑
+    assert masked[5:].min() == 200              # 其余部分原样保留
+    assert gfx.mask_top(png, 0).max() == 200    # pixels=0 不涂
+    assert gfx.mask_top_png(png, 0) is png      # pixels<=0 原样返回字节
+
+
+def test_matches_masks_both_current_and_reference(tmp_path, monkeypatch):
+    """送模型的两张图顶部都被涂黑，且参照图与当前图按同一比例处理。"""
+    pytest.importorskip("cv2", reason="涂黑走 gfx，需要 cv2")
+
+    from runner import gfx
+
+    monkeypatch.setattr(settings, "JUDGE_MASK_TOP_PIXELS", 5)
+    received = []
+
+    class RecordingJudge:
+        threshold = 0.6
+
+        def judge(self, image_a, image_b):
+            received.append((image_a, image_b))
+            return verdict(True)
+
+    class StubSession:
+        def grab(self):
+            return _real_png(width=40, height=20, value=200), None
+
+    group = load_group("御魂十一", build_dataset(tmp_path))
+    shot = group.shots[0]
+    shot.image_path.write_bytes(_real_png(width=40, height=20, value=90))
+
+    matcher = ScreenMatcher(StubSession(), judge=RecordingJudge())
+    result = matcher.matches(shot)
+
+    assert result.matched is True
+    current, reference = received[0]
+    for image in (current, reference):
+        assert isinstance(image, bytes)
+        array = gfx.decode(image)
+        assert array.shape[0] == 20
+        assert array[:5].max() == 0             # 顶部涂黑
+    assert result.detail["mask_top"] == 5

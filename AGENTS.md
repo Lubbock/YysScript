@@ -78,7 +78,10 @@ archive/               旧模板匹配管线，独立一棵树，不被上面任
   （旧代码把 `E:/github/YysScript/...` 写死在源码里，已彻底移除。）
   runner 相关：`RUNNER_DSL_FILENAME`（分组里的 DSL 文件名，默认 `flow.py`）、
   `RUNNER_STEP_TIMEOUT`(120s) / `RUNNER_ROUND_TIMEOUT`(900s) / `RUNNER_PROBE_INTERVAL`(1s) /
-  `RUNNER_SETTLE_PAUSE`(0.6s)。模型与阈值走 `YYS_OLLAMA_MODEL` / `YYS_SIMILARITY_THRESHOLD`。
+  `RUNNER_SETTLE_PAUSE`(0.6s)。模型与阈值走 `YYS_OLLAMA_MODEL` / `YYS_SIMILARITY_THRESHOLD`(0.6)。
+  `JUDGE_MASK_TOP_PIXELS`(60，环境变量 `YYS_JUDGE_MASK_TOP_PIXELS`)：判定前把**两张图**顶部
+  这么多像素涂黑，去掉镜像窗口标题栏透出的桌面壁纸；不涂黑会让同一界面被判成
+  0.45 / `same_screen=false`（见已知限制 1）。图片尺寸不变，标注坐标不受影响。
 - `coordinates.py`：只剩一个类型 `Point(x, y)` = 基准客户区（`BASE_CLIENT_SIZE` = 1024×768）下的
   逻辑坐标，供 `Viewport` 使用。**旧的界面坐标常量表已随模板匹配管线删除。**
   ⚠️ runner 的点击坐标不来自这个文件，而来自分组标注的像素坐标经 `Session.resolve()` 换算。
@@ -184,11 +187,13 @@ python similarity/app.py            # http://127.0.0.1:8901，只绑本机
   且它不支持 generate / chat。`health()` 启动自检会拦住并给出原因。
   ⚠️ 模型 `similarity` 只分得开两档（同屏 0.99 / 不同屏 0.05），中间地带也给 0.99，
   所以它能答「是不是同一界面」，**不能当连续相似度度量**。真机 6 对标定 6/6 正确。
+  （窗口标题栏透出的桌面会让它多给一档 0.45；runner 侧靠涂黑顶部解决，见已知限制 1。）
   自检 CLI：`python -m similarity.llm_judge [a.png b.png]`。
 
 - **分组 DSL（`dataset/groups/<key>/flow.py`）**：每个分组自带一份 Python 文件，声明这组截图的
-  界面流转顺序，runner 发现它就自动加载。`python main.py --group <名> --init-dsl` 按现有标注
-  生成草稿。截图 PNG 不入版本库，但 `flow.py` **入库** —— 它是逻辑不是数据。语法见下面 `runner/` 一节。
+  界面流转顺序，runner 发现它就自动加载。**没有这个文件时，按分组名直接跑会自动生成一份链式草稿**
+  （按截图采集顺序一步接一步）并落盘；也可 `--init-dsl` 显式生成（`--force` 覆盖）。
+  截图 PNG 不入版本库，但 `flow.py` **入库** —— 它是逻辑不是数据。语法见下面 `runner/` 一节。
 
 细节见 `similarity/README.md` 与 `runner/README.md`。
 
@@ -200,9 +205,9 @@ python similarity/app.py            # http://127.0.0.1:8901，只绑本机
 | 文件 | 职责 |
 |---|---|
 | `group.py` | 只读打开 `similarity/dataset/`：`GroupRef` / `ShotRef` / `AnnotationRef`；按**标注名 / 截图备注 / 截图 id** 解析到具体截图与标注 |
-| `dsl.py` | 加载分组里的 `flow.py`：注入命名空间 -> 执行 -> 校验 `steps` -> 收集钩子；`scaffold()` 按现有标注生成草稿 |
+| `dsl.py` | 加载分组里的 `flow.py`：注入命名空间 -> 执行 -> 校验 `steps` -> 收集钩子；`load_or_scaffold()` 在没有 `flow.py` 时按标注顺序自动生成链式草稿 |
 | `session.py` | 一次运行的环境：找窗口 -> `Viewport` -> `ScreenCapture`（区域绑定窗口）-> `HumanMouse`。`resolve(shot, x, y)` 把标注像素换算成逻辑坐标与屏幕坐标。**cv2 / pyautogui 懒加载**，import 本包不需要它们 |
-| `matcher.py` | `ScreenMatcher.matches(shot)`：**只比对当前这一步的那一张图**，返回 `Verdict(matched, score, same_screen, elapsed, detail)`，并把判定耗时记进自适应等待 |
+| `matcher.py` | `ScreenMatcher.matches(shot)`：**只比对当前这一步的那一张图**；送模型前把两张图顶部 `JUDGE_MASK_TOP_PIXELS` 像素涂黑（去掉镜像窗口标题栏透出的桌面）；返回 `Verdict(matched, score, same_screen, elapsed, detail)`，并把判定耗时记进自适应等待 |
 | `actor.py` | 点击：逻辑坐标 -> `Viewport.to_screen` -> `HumanMouse.click`；`dry_run` 时只记日志不动鼠标 |
 | `engine.py` | `Runner.run()` 主循环 + `Context`（钩子里能用的截屏/比对/点击/变量）+ `RunReport` / `RoundReport` |
 | `gfx.py` | **图形算法库**，已注入 DSL 命名空间，DSL 里直接写 `gfx.brightness(png)`；要加自己的算法就在这个文件加一个函数 |
@@ -310,7 +315,7 @@ runner 的换算链（`Session.resolve(shot, x, y)`，四步、两套 Viewport�
 | 改一个玩法的顺序 / 超时 | 该分组的 `flow.py`（`steps` 顺序、`timeout`、`round_timeout`） |
 | 加一条「遇到 X 就点 Y」的规则 | 该分组 `flow.py` 里加钩子（`on_step_matched` / `on_step_timeout`），或用 `step(..., optional=True)` |
 | 需要新的图形算法 | 加在 `runner/gfx.py`，DSL 里直接 `gfx.你的函数(...)` |
-| 新起一个玩法 | 标注页新建分组 -> 截图标注 -> `python main.py --group <名> --init-dsl` -> 调 `steps` |
+| 新起一个玩法 | 标注页新建分组 -> 截图标注 -> 直接 `python main.py --group <名> --times N`（自动按截图顺序生成链式 `flow.py`）-> 再调 `steps` |
 | 换分辨率 / 窗口改大小后整体偏移 | `config/settings.py` 的 `BASE_CLIENT_SIZE` / `CALIBRATION_OFFSET`；多数情况 `Viewport` 会自动缩放，无需改 |
 | 点击太快 / 太规律 | `settings.py` 的 `HUMAN_JITTER` / `HUMAN_PAUSE_RANGE` / `HUMAN_DRAG_STEPS`，或 `--no-humanize` 对照 |
 | 日志、数据库位置 | 环境变量 `YYS_LOG_DIR` / `YYS_DB_PATH`，或 `settings.py` |
@@ -332,9 +337,9 @@ ollama pull lfm3-omni:latest         # 判定模型，必须 completion + vision
 # 1) 采集：起标注页，新建分组 -> 截屏 -> 框选/点选标注 -> 保存
 python similarity/app.py                       # http://127.0.0.1:8901，只绑本机
 
-# 2) 生成并调整 DSL
+# 2) DSL：没有 flow.py 时会按截图采集顺序自动生成链式流程，也可显式生成 / 查看
 python main.py --list                          # 列出全部分组（含截图数 / 标注数 / 有没有 DSL）
-python main.py --group 御魂十一 --init-dsl      # 按现有标注生成 flow.py 草稿（--force 覆盖）
+python main.py --group 御魂十一 --init-dsl      # 显式生成 flow.py 草稿（--force 覆盖）
 python main.py --group 御魂十一 --show          # 打印解析结果：每步的截图、标注、坐标、超时
 
 # 3) 跑
@@ -405,9 +410,17 @@ mouse 注入进去）。`pytest.ini` 的 `testpaths = tests` + `norecursedirs` �
 
 ## 8. 已知限制
 
-1. **模型判定慢，而且只分得开两档**：单次 1.3~2.8 秒；`similarity` 实测只有「同屏 0.99 /
-   不同屏 0.05」两档，中间地带也给 0.99。所以它能答「是不是同一界面」，
-   **不能当连续相似度度量**，也别指望靠调阈值细分。真机 6 对标定 6/6 正确。
+1. **模型判定慢，而且只分得开两档**：单次 1.3~4 秒；`similarity` 实测只有「同屏 0.99 /
+   不同屏 0.05」两档，所以它能答「是不是同一界面」，**不能当连续相似度度量**。
+   `matched = same_screen AND score >= 阈值(0.6)`：模型给 `same_screen=false` 时，
+   **把阈值降到 0.4 也照样不命中** —— 别拿调阈值当万能解。
+   ⚠️ 实测出现过第三档 **0.45**（雷麒麟「完成」连续 70 次、卡满 120s 超时）：镜像窗口上沿
+   是标题栏，透出桌面壁纸且每局不同，模型据此判「不是同一界面」，理由里却写着
+   "同一功能页面"。像素证据：失败图与参照图顶部 60px 平均差 80.5，其余各带只有 3~24。
+   修法是判定时把两张图顶部 `JUDGE_MASK_TOP_PIXELS`(60) 涂黑（`runner/gfx.mask_top`），
+   涂黑后 0.45/false -> **0.99/true**，同组「挑战 vs 完成」仍是 0.05/false。
+   **不要改 prompt 来放宽**：试过「只看布局、忽略背景」的写法，目标场景是修好了，
+   但同组的「挑战 vs 完成」被误判成同一界面（0.85），会导致在挑战屏点完成的坐标。
 2. **必须用同时具备 completion + vision 的模型**：纯 embedding 模型不行 —— 实测
    `embeddinggemma-2:740m` 虽然 capabilities 带 vision，但 Ollama `/api/embed` 会**静默丢弃**
    `images`（三张不同图返回同一向量，cosine=1.000000，0.02s 无视觉编码），且不支持 generate / chat。

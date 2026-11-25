@@ -170,6 +170,25 @@ def describe(image: Image) -> str:
                                               saturation(image))
 
 
+def mask_top(image: Image, pixels: int) -> Any:
+    """把图片顶部 pixels 行涂黑，尺寸不变。"""
+    array = decode(image)
+    height = int(array.shape[0])
+    cut = max(0, min(height, int(pixels)))
+    if cut == 0:
+        return array
+    masked = array.copy()
+    masked[:cut] = 0
+    return masked
+
+
+def mask_top_png(png: bytes, pixels: int) -> bytes:
+    """PNG 字节顶部涂黑后重新编码；pixels<=0 时原样返回。"""
+    if int(pixels) <= 0:
+        return png
+    return encode_png(mask_top(png, pixels))
+
+
 HELPERS = {
     "decode": decode,
     "encode_png": encode_png,
@@ -188,4 +207,6 @@ HELPERS = {
     "center_of": center_of,
     "scale_point": scale_point,
     "describe": describe,
+    "mask_top": mask_top,
+    "mask_top_png": mask_top_png,
 }

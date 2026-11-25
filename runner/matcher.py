@@ -2,6 +2,9 @@
 
 DSL 把界面顺序声明成 steps 之后，每一步只需要拿当前截图和**那一张**目标图比，
 不必遍历分组里的全部图片 —— 这是分组有序流转带来的主要收益。
+
+送模型前把两张图的顶部 `settings.JUDGE_MASK_TOP_PIXELS` 像素涂黑：镜像窗口上沿是标题栏，
+会透出桌面壁纸，每次都不同，不涂黑会把同一界面判成 0.45 / same_screen=false。
 """
 from __future__ import annotations
 
@@ -9,7 +12,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
+from config import settings
 from core.logger import get_logger
+from runner import gfx
 from runner.errors import RunnerError
 from runner.group import ShotRef
 from runner.session import Session
@@ -62,9 +67,14 @@ class ScreenMatcher:
     def matches(self, shot: ShotRef) -> Verdict:
         """当前画面是否就是这张截图。"""
         started = time.monotonic()
+        pixels = settings.JUDGE_MASK_TOP_PIXELS
         try:
             png, _frame = self.session.grab()
-            verdict = self.judge.judge(png, shot.image_path)
+            target: Any = shot.image_path
+            if pixels > 0:
+                png = gfx.mask_top_png(png, pixels)
+                target = gfx.mask_top_png(shot.image_path.read_bytes(), pixels)
+            verdict = self.judge.judge(png, target)
         except JudgeError as exc:
             raise RunnerError("模型判定失败：{}".format(exc))
         except OSError as exc:
@@ -91,6 +101,7 @@ class ScreenMatcher:
                 "differences": verdict["differences"],
                 "truncated": verdict["truncated"],
                 "threshold": self.threshold,
+                "mask_top": pixels,
                 "model": verdict["model"],
             },
         )

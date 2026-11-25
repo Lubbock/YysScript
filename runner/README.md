@@ -5,7 +5,7 @@
 
 ```bash
 python main.py --list                       # 列出全部分组
-python main.py --group 御魂十一 --init-dsl   # 按现有标注生成 flow.py 草稿
+python main.py --group 御魂十一 --init-dsl   # 显式生成草稿（缺 flow.py 时首次运行会自动生成链式草稿）
 python main.py --group 御魂十一 --show       # 打印解析结果（不截屏不点击）
 python main.py --group 御魂十一 --dry-run    # 走引擎但不执行（离线可用）
 python main.py --group 御魂十一 --times 10   # 跑 10 轮
@@ -19,9 +19,9 @@ python main.py --group 御魂十一              # 无限循环，Ctrl-C 停
 | 文件 | 职责 |
 |---|---|
 | `group.py` | 分组解析：读数据集 → `GroupRef` / `ShotRef` / `AnnotationRef`（box 标注自动取中心点） |
-| `dsl.py` | 加载 `flow.py`：注入命名空间、`exec`、校验 steps、收集钩子；`scaffold()` 生成草稿 |
+| `dsl.py` | 加载 `flow.py`：注入命名空间、`exec`、校验 steps、收集钩子；`load_or_scaffold()` 缺文件时按标注生成链式草稿 |
 | `session.py` | 窗口 + 截屏 + **Viewport 坐标换算** + 拟人化鼠标（旧 `GameController` 的精简替代） |
-| `matcher.py` | 单图比对：截当前屏 → 和目标图送模型 → `Verdict`；判定耗时记进 probe 窗口 |
+| `matcher.py` | 单图比对：截当前屏 → 两张图顶部涂黑 → 送模型 → `Verdict`；判定耗时记进 probe 窗口 |
 | `actor.py` | 点击：命中后停顿、调 `session.click_annotation`、激活失败自动重试 |
 | `engine.py` | 主循环：轮次控制、按 steps 推进、自适应等待、超时、钩子、报告 |
 | `gfx.py` | 外部图形算法库，DSL 里直接 `gfx.xxx()` 调用 |
